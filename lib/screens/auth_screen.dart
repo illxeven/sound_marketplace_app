@@ -550,20 +550,24 @@ If you have questions regarding these Terms of Service, please contact us at sup
                   ),
                 ] else ...[
                   const Text(
-                    'Enter the token sent to your email and create your new password.',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                    'We sent an 8-character reset code to your email. Enter the code below and choose your new password.',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
                   TextField(
                     controller: tokenController,
+                    textCapitalization: TextCapitalization.characters,
+                    style: const TextStyle(letterSpacing: 2, fontWeight: FontWeight.bold, fontSize: 15),
                     onChanged: (_) {
                       if (resetErrorText != null) {
                         setModalState(() => resetErrorText = null);
                       }
                     },
-                    decoration: const InputDecoration(
-                      labelText: 'Reset Token',
-                      prefixIcon: Icon(Icons.vpn_key_outlined, color: AppTheme.secondaryCyan),
+                    decoration: InputDecoration(
+                      labelText: 'Reset Token (from email)',
+                      hintText: 'e.g. A1B2C3D4',
+                      prefixIcon: const Icon(Icons.vpn_key_outlined, color: AppTheme.secondaryCyan),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                   const SizedBox(height: 12),
