@@ -2,19 +2,36 @@ import 'package:flutter/foundation.dart';
 import '../models/album.dart';
 import '../models/track.dart';
 import '../models/track_comment.dart';
+import '../services/api_client.dart';
 import '../services/catalog_service.dart';
 import '../services/engagement_service.dart';
 
+/// Tracks, beats, albums, likes and live play counts.
+///
+/// Lists load page by page from the server. Like and play counts come with each page (no
+/// per-track requests), liked state comes from `/users/me/liked-track-ids`, and play counts
+/// are replaced with the server's number every time the player reports a play.
 class CatalogProvider extends ChangeNotifier {
-  final CatalogService _catalogService = CatalogService();
-  final EngagementService _engagementService = EngagementService();
+  CatalogProvider({CatalogService? catalogService, EngagementService? engagementService})
+      : _catalogService = catalogService ?? CatalogService(),
+        _engagementService = engagementService ?? EngagementService();
+
+  final CatalogService _catalogService;
+  final EngagementService _engagementService;
+
+  static const int _pageSize = 30;
 
   List<Track> _tracks = [];
+  List<Track> _beats = [];
   List<Album> _albums = [];
   List<String> _dbGenres = [];
   String? _selectedGenre;
   String _searchQuery = '';
   bool _isLoading = false;
+  bool _isLoadingMore = false;
+  bool _isLoadingBeats = false;
+  bool _hasMore = true;
+  int _nextPage = 0;
   String? _errorMessage;
 
   final Set<int> _likedTrackIds = {};
@@ -22,110 +39,163 @@ class CatalogProvider extends ChangeNotifier {
   final Map<int, int> _playCounts = {};
   final Map<int, List<TrackComment>> _trackComments = {};
 
+  List<Track> get allTracks => List.unmodifiable(_tracks);
+  List<Track> get beats => List.unmodifiable(_beats);
+
+  /// Tracks filtered by the selected genre and search text (title, artist, genre).
   List<Track> get tracks {
+    final q = _searchQuery.trim().toLowerCase();
     return _tracks.where((t) {
-      final matchesGenre =
-          _selectedGenre == null ||
+      final matchesGenre = _selectedGenre == null ||
           _selectedGenre!.isEmpty ||
           _selectedGenre == 'All' ||
-          (t.genre != null &&
-              t.genre!.toLowerCase() == _selectedGenre!.toLowerCase());
-      final matchesSearch =
-          _searchQuery.isEmpty ||
-          t.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-          (t.artistEmail != null &&
-              t.artistEmail!.toLowerCase().contains(
-                _searchQuery.toLowerCase(),
-              ));
+          (t.genre ?? '').toLowerCase() == _selectedGenre!.toLowerCase();
+      final matchesSearch = q.isEmpty ||
+          t.title.toLowerCase().contains(q) ||
+          (t.artistName ?? '').toLowerCase().contains(q) ||
+          (t.genre ?? '').toLowerCase().contains(q);
       return matchesGenre && matchesSearch;
     }).toList();
+  }
+
+  /// Most played first.
+  List<Track> get trendingTracks {
+    final sorted = List<Track>.from(_tracks)..sort((a, b) => getTrackPlays(b.id).compareTo(getTrackPlays(a.id)));
+    return sorted.take(10).toList();
   }
 
   List<Album> get albums => _albums;
   String? get selectedGenre => _selectedGenre;
   String get searchQuery => _searchQuery;
   bool get isLoading => _isLoading;
+  bool get isLoadingMore => _isLoadingMore;
+  bool get isLoadingBeats => _isLoadingBeats;
+  bool get hasMore => _hasMore;
   String? get errorMessage => _errorMessage;
 
   bool isTrackLiked(int trackId) => _likedTrackIds.contains(trackId);
   int getTrackLikes(int trackId) => _likeCounts[trackId] ?? 0;
-  int getTrackPlays(int trackId) {
-    if (_playCounts.containsKey(trackId)) {
-      return _playCounts[trackId]!;
-    }
+  int getTrackPlays(int trackId) => _playCounts[trackId] ?? 0;
+
+  Track? trackById(int id) {
     for (final t in _tracks) {
-      if (t.id == trackId) return t.playsCount;
+      if (t.id == id) return t;
     }
-    return 0;
+    for (final t in _beats) {
+      if (t.id == id) return t;
+    }
+    return null;
   }
 
-  void incrementTrackPlays(int trackId) {
-    final current = getTrackPlays(trackId);
-    _playCounts[trackId] = current + 1;
-    final idx = _tracks.indexWhere((t) => t.id == trackId);
-    if (idx != -1) {
-      _tracks[idx] = _tracks[idx].copyWith(playsCount: current + 1);
-    }
+  /// Sets the play count to the server's number (from the play-event response).
+  void applyPlayCount(int trackId, int playCount) {
+    if (_playCounts[trackId] == playCount) return;
+    _playCounts[trackId] = playCount;
     notifyListeners();
   }
 
-  List<TrackComment> getCommentsForTrack(int trackId) =>
-      _trackComments[trackId] ?? [];
+  /// Kept for older callers: optimistic +1 when no server count is available.
+  void incrementTrackPlays(int trackId) => applyPlayCount(trackId, getTrackPlays(trackId) + 1);
+
+  List<TrackComment> getCommentsForTrack(int trackId) => _trackComments[trackId] ?? [];
 
   List<String> get availableGenres {
-    final set = <String>{'All'};
-    if (_dbGenres.isNotEmpty) {
-      set.addAll(_dbGenres);
-    }
-    for (var t in _tracks) {
-      if (t.genre != null && t.genre!.isNotEmpty) {
-        set.add(t.genre!);
-      }
-    }
-    if (set.length == 1) {
-      set.addAll([
-        'Hip Hop & Rap (General)',
-        'Electronic',
-        'Pop',
-        'R&B & Soul',
-        'Rock',
-        'Other',
-      ]);
+    final set = <String>{'All', ..._dbGenres};
+    for (final t in _tracks) {
+      if (t.genre != null && t.genre!.isNotEmpty) set.add(t.genre!);
     }
     return set.toList();
   }
 
-  Future<void> loadCatalog() async {
+  void _absorbCounts(Iterable<Track> tracks) {
+    for (final t in tracks) {
+      _likeCounts[t.id] = t.likesCount;
+      // Keep a newer live count if the player already updated it.
+      _playCounts[t.id] = t.playsCount > (_playCounts[t.id] ?? 0) ? t.playsCount : (_playCounts[t.id] ?? t.playsCount);
+    }
+  }
+
+  /// First page of tracks plus albums, genres and (when signed in) liked tracks.
+  Future<void> loadCatalog({bool signedIn = true}) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
-
     try {
-      final results = await Future.wait([
-        _catalogService.getAllTracks(),
-        _catalogService.getAllAlbums(),
-        _catalogService.getGenres().catchError((_) => <String>[]),
-      ]);
-      _tracks = results[0] as List<Track>;
-      _albums = results[1] as List<Album>;
-      _dbGenres = results[2] as List<String>;
+      final page = await _catalogService.getTracksPage(page: 0, size: _pageSize);
+      _tracks = page.items;
+      _nextPage = 1;
+      _hasMore = page.hasNext;
+      _absorbCounts(_tracks);
 
-      // Load like counts and play counts initialized from Track models
-      for (var t in _tracks) {
-        _likeCounts[t.id] = t.likesCount;
-        _playCounts[t.id] = t.playsCount;
-        _engagementService
-            .getTrackLikesCount(t.id)
-            .then((count) {
-              _likeCounts[t.id] = count;
-              notifyListeners();
-            })
-            .catchError((_) {});
+      // Secondary data: a failure here shouldn't hide the tracks.
+      final results = await Future.wait([
+        _catalogService.getAllAlbums().catchError((Object e) {
+          debugPrint('[catalog] albums failed: $e');
+          return <Album>[];
+        }),
+        _catalogService.getGenres().catchError((Object e) {
+          debugPrint('[catalog] genres failed: $e');
+          return <String>[];
+        }),
+        if (signedIn)
+          _engagementService.getLikedTrackIds().catchError((Object e) {
+            debugPrint('[catalog] liked ids failed: $e');
+            return <int>{};
+          }),
+      ]);
+      _albums = results[0] as List<Album>;
+      _dbGenres = results[1] as List<String>;
+      if (signedIn) {
+        _likedTrackIds
+          ..clear()
+          ..addAll(results[2] as Set<int>);
       }
-    } catch (e) {
-      _errorMessage = e.toString();
+    } on ApiException catch (e) {
+      _errorMessage = e.message;
     } finally {
       _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Next page for infinite scroll. Safe to call repeatedly.
+  Future<void> loadMoreTracks() async {
+    if (_isLoadingMore || !_hasMore || _isLoading) return;
+    _isLoadingMore = true;
+    notifyListeners();
+    try {
+      final page = await _catalogService.getTracksPage(page: _nextPage, size: _pageSize);
+      final known = _tracks.map((t) => t.id).toSet();
+      final fresh = page.items.where((t) => !known.contains(t.id)).toList();
+      _tracks.addAll(fresh);
+      _absorbCounts(fresh);
+      _nextPage++;
+      _hasMore = page.hasNext;
+    } on ApiException catch (e) {
+      _errorMessage = e.message;
+    } finally {
+      _isLoadingMore = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadBeats({String? genre, String? search}) async {
+    _isLoadingBeats = true;
+    notifyListeners();
+    try {
+      _beats = await _catalogService.getBeats(genre: genre, search: search);
+      // Beat listings carry no counts; use what the catalog already knows.
+      for (final b in _beats) {
+        final known = _tracks.where((t) => t.id == b.id);
+        if (known.isNotEmpty) {
+          _playCounts.putIfAbsent(b.id, () => known.first.playsCount);
+          _likeCounts.putIfAbsent(b.id, () => known.first.likesCount);
+        }
+      }
+    } on ApiException catch (e) {
+      _errorMessage = e.message;
+    } finally {
+      _isLoadingBeats = false;
       notifyListeners();
     }
   }
@@ -140,11 +210,11 @@ class CatalogProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> toggleLike(int trackId, int userId) async {
+  /// Optimistic like/unlike with rollback if the server call fails.
+  Future<void> toggleLike(int trackId, [int? userId]) async {
     final alreadyLiked = _likedTrackIds.contains(trackId);
     final currentCount = _likeCounts[trackId] ?? 0;
 
-    // Optimistic update
     if (alreadyLiked) {
       _likedTrackIds.remove(trackId);
       _likeCounts[trackId] = currentCount > 0 ? currentCount - 1 : 0;
@@ -156,21 +226,30 @@ class CatalogProvider extends ChangeNotifier {
 
     try {
       if (alreadyLiked) {
-        await _engagementService.unlikeTrack(trackId, userId);
+        await _engagementService.unlikeTrack(trackId);
       } else {
-        await _engagementService.likeTrack(trackId, userId);
+        await _engagementService.likeTrack(trackId);
       }
-    } catch (e) {
-      // Revert on error
+    } on ApiException catch (e) {
+      debugPrint('[catalog] like toggle failed trackId=$trackId: ${e.message}');
       if (alreadyLiked) {
         _likedTrackIds.add(trackId);
-        _likeCounts[trackId] = currentCount;
       } else {
         _likedTrackIds.remove(trackId);
-        _likeCounts[trackId] = currentCount;
       }
+      _likeCounts[trackId] = currentCount;
+      _errorMessage = e.message;
       notifyListeners();
     }
+  }
+
+  /// Clears per-user state on sign-out.
+  void reset() {
+    _likedTrackIds.clear();
+    _trackComments.clear();
+    _searchQuery = '';
+    _selectedGenre = null;
+    notifyListeners();
   }
 
   Future<void> loadComments(int trackId) async {

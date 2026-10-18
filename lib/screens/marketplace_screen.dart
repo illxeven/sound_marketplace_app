@@ -128,7 +128,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                             ? NetworkImage(
                                 user.avatarUrl!.startsWith('http')
                                     ? user.avatarUrl!
-                                    : '${ApiConfig.baseUrl}${user.avatarUrl!.startsWith('/') ? user.avatarUrl! : '/${user.avatarUrl!}'}',
+                                    : ApiConfig.resolve(user.avatarUrl!),
                               )
                             : null,
                         child: (user.avatarUrl == null || user.avatarUrl!.isEmpty)

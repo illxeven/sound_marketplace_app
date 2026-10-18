@@ -76,4 +76,11 @@ class PlaylistProvider extends ChangeNotifier {
       return false;
     }
   }
+
+  /// Clears this user's data on sign-out so the next person on the device doesn't see it.
+  void reset() {
+    _userPlaylists = [];
+    _errorMessage = null;
+    notifyListeners();
+  }
 }

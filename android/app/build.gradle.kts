@@ -42,3 +42,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Theme.MaterialComponents (required by flutter_stripe's PaymentSheet).
+    implementation("com.google.android.material:material:1.12.0")
+}

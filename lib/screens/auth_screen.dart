@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../providers/auth_provider.dart';
-import '../services/geolocation_service.dart';
 
 enum UserRoleOption { consumer, artistProducer }
 
@@ -22,6 +21,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _loginEmailController = TextEditingController();
   final _loginPasswordController = TextEditingController();
   bool _loginObscurePassword = true;
+
+  /// Red error text shown under each form (null = no error).
+  String? _loginError;
+  String? _registerError;
+
+  static const int _minPasswordLength = 10;
 
   // Register Controllers
   final _regFormKey = GlobalKey<FormState>();
@@ -141,35 +146,41 @@ If you have questions regarding these Terms of Service, please contact us at sup
   }
 
   Future<void> _handleLogin() async {
+    setState(() => _loginError = null);
     if (!_loginFormKey.currentState!.validate()) return;
 
     final auth = context.read<AuthProvider>();
     final email = _loginEmailController.text.trim();
-    final success = await auth.login(
-      email: email,
-      password: _loginPasswordController.text,
-    );
+    final password = _loginPasswordController.text;
+    final success = await auth.login(email: email, password: password);
 
-    if (!mounted) return;
-    if (!success) {
-      if (auth.errorMessage == 'UNVERIFIED_EMAIL') {
-        _showVerificationDialog(email);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Your email is not verified yet. Please enter the verification code sent to your email to activate your account.'),
-            backgroundColor: Colors.orangeAccent,
-            duration: Duration(seconds: 4),
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(auth.errorMessage ?? 'Login failed. Please check your credentials.'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
+    if (!mounted || success) return;
+    if (auth.needsEmailVerification) {
+      setState(() => _loginError = 'Your email isn\'t verified yet. Enter the code we emailed you.');
+      _showVerificationDialog(email, password: password);
+    } else {
+      setState(() => _loginError = auth.errorMessage ?? 'Incorrect email or password.');
     }
+  }
+
+  Widget _errorText(String? message) {
+    if (message == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.error_outline, color: Colors.redAccent, size: 16),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: Colors.redAccent, fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showTermsOfServiceDialog() {
@@ -257,39 +268,32 @@ If you have questions regarding these Terms of Service, please contact us at sup
   }
 
   Future<void> _handleRegister() async {
+    setState(() => _registerError = null);
     if (!_regFormKey.currentState!.validate()) return;
 
     if (!_agreedToTerms) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You must read and agree to the Terms of Service before registering.'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      setState(() => _registerError = 'Please read and agree to the Terms of Service.');
       return;
     }
 
     final auth = context.read<AuthProvider>();
     final isArtist = _selectedRole == UserRoleOption.artistProducer;
-    final roleString = isArtist ? 'music_artist' : 'consumer';
-
-    // If artist, use stage name as display name or combine
     final effectiveDisplayName = isArtist && _regStageNameController.text.trim().isNotEmpty
         ? _regStageNameController.text.trim()
         : _regDisplayNameController.text.trim();
 
-    // Auto-detect country via Google Geocoding / IP Geolocation automatically
-    final autoDetectedCountry = await GeolocationService.detectCountryCode();
+    // Country comes from the device locale; no third-party IP lookup without consent.
+    final country = WidgetsBinding.instance.platformDispatcher.locale.countryCode;
+    final email = _regEmailController.text.trim();
+    final password = _regPasswordController.text;
 
     final success = await auth.register(
-      email: _regEmailController.text.trim(),
-      password: _regPasswordController.text,
+      email: email,
+      password: password,
       displayName: effectiveDisplayName,
-      country: autoDetectedCountry,
-      role: roleString,
-      bio: isArtist && _regBioController.text.trim().isNotEmpty
-          ? _regBioController.text.trim()
-          : null,
+      country: country,
+      role: isArtist ? 'music_artist' : 'consumer',
+      bio: isArtist && _regBioController.text.trim().isNotEmpty ? _regBioController.text.trim() : null,
       termsAccepted: _agreedToTerms,
       avatarPath: _pickedAvatarFile?.path,
       avatarBytes: _pickedAvatarFile?.bytes,
@@ -298,18 +302,16 @@ If you have questions regarding these Terms of Service, please contact us at sup
 
     if (!mounted) return;
     if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(auth.errorMessage ?? 'Registration failed. Email might already exist.'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
-    } else {
-      _showVerificationDialog(_regEmailController.text.trim());
+      setState(() => _registerError = auth.errorMessage ?? 'We couldn\'t create your account. Please try again.');
+      return;
     }
+    _loginEmailController.text = email;
+    _showVerificationDialog(email, password: password);
   }
 
-  void _showVerificationDialog(String email) {
+  /// Asks for the emailed code. When [password] is known (just registered or tried to sign in),
+  /// the user is signed in automatically after a successful verification.
+  void _showVerificationDialog(String email, {String? password}) {
     final tokenController = TextEditingController();
     bool isSubmitting = false;
     String? dialogError;
@@ -386,14 +388,19 @@ If you have questions regarding these Terms of Service, please contact us at sup
                       icon: const Icon(Icons.refresh_rounded, size: 16),
                       label: const Text('Resend Verification Code', style: TextStyle(fontSize: 12)),
                       onPressed: () async {
-                        final ok = await context.read<AuthProvider>().resendVerification(email);
-                        if (ctx.mounted) {
+                        final auth = context.read<AuthProvider>();
+                        final ok = await auth.resendVerification(email);
+                        if (!ctx.mounted) return;
+                        if (ok) {
+                          setModalState(() => dialogError = null);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(ok ? 'New verification code dispatched to $email!' : 'Failed to resend code'),
-                              backgroundColor: ok ? AppTheme.successGreen : Colors.redAccent,
+                            const SnackBar(
+                              content: Text('If your account still needs verifying, a new code is on its way. It can take a minute.'),
+                              backgroundColor: AppTheme.successGreen,
                             ),
                           );
+                        } else {
+                          setModalState(() => dialogError = auth.errorMessage ?? 'We couldn\'t send a new code. Try again in a minute.');
                         }
                       },
                     ),
@@ -426,23 +433,36 @@ If you have questions regarding these Terms of Service, please contact us at sup
                         dialogError = null;
                       });
 
-                      final verified = await context.read<AuthProvider>().verifyEmail(code);
+                      final auth = context.read<AuthProvider>();
+                      final verified = await auth.verifyEmail(code);
+                      if (!ctx.mounted) return;
 
-                      if (ctx.mounted) {
-                        if (verified) {
-                          Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Email verified successfully! Welcome to Sound Marketplace.'),
-                              backgroundColor: AppTheme.successGreen,
-                            ),
-                          );
-                        } else {
-                          setModalState(() {
-                            isSubmitting = false;
-                            dialogError = context.read<AuthProvider>().errorMessage ?? 'Invalid or expired verification code';
-                          });
+                      if (!verified) {
+                        setModalState(() {
+                          isSubmitting = false;
+                          dialogError = auth.errorMessage ?? 'That code is invalid or has expired. Tap "Resend" for a new one.';
+                        });
+                        return;
+                      }
+
+                      Navigator.pop(ctx);
+                      setState(() => _loginError = null);
+                      if (password != null) {
+                        // Account is active: sign straight in.
+                        final signedIn = await auth.login(email: email, password: password);
+                        if (!mounted) return;
+                        if (!signedIn) {
+                          _tabController.animateTo(0);
+                          setState(() => _loginError = auth.errorMessage);
                         }
+                      } else {
+                        _tabController.animateTo(0);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Email verified. Sign in to continue.'),
+                            backgroundColor: AppTheme.successGreen,
+                          ),
+                        );
                       }
                     },
               child: isSubmitting
@@ -482,7 +502,7 @@ If you have questions regarding these Terms of Service, please contact us at sup
               children: [
                 if (!isResetStage) ...[
                   const Text(
-                    'Enter your registered email address to receive a secure recovery token or username reminder.',
+                    'Enter your account email. We\'ll send a reset code (or a username reminder).',
                     style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
                   ),
                   const SizedBox(height: 14),
@@ -506,7 +526,9 @@ If you have questions regarding these Terms of Service, please contact us at sup
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Row(
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       TextButton.icon(
                         icon: const Icon(Icons.person_search_rounded, size: 16),
@@ -521,36 +543,33 @@ If you have questions regarding these Terms of Service, please contact us at sup
                             isSubmitting = true;
                             emailErrorText = null;
                           });
-                          final ok = await context.read<AuthProvider>().recoverUsername(email);
+                          final auth = context.read<AuthProvider>();
+                          final ok = await auth.recoverUsername(email);
                           setModalState(() => isSubmitting = false);
-                          if (ctx.mounted) {
-                            if (ok) {
-                              Navigator.pop(ctx);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Username reminder sent to your email!')),
-                              );
-                            } else {
-                              setModalState(() {
-                                emailErrorText = 'Email is not found in the db';
-                              });
-                            }
+                          if (!ctx.mounted) return;
+                          if (ok) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('If an account exists for this email, we\'ve sent your username.')),
+                            );
+                          } else {
+                            setModalState(() => emailErrorText = auth.errorMessage ?? 'We couldn\'t send the reminder. Try again.');
                           }
                         },
                       ),
-                      const Spacer(),
                       TextButton(
                         onPressed: () => setModalState(() {
                           isResetStage = true;
                           emailErrorText = null;
                           resetErrorText = null;
                         }),
-                        child: const Text('I have a token', style: TextStyle(fontSize: 12)),
+                        child: const Text('I have a code', style: TextStyle(fontSize: 12)),
                       ),
                     ],
                   ),
                 ] else ...[
                   const Text(
-                    'We sent an 8-character reset code to your email. Enter the code below and choose your new password.',
+                    'Enter the 8-character code from the email and choose a new password. The code expires in 30 minutes.',
                     style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
                   ),
                   const SizedBox(height: 16),
@@ -564,7 +583,7 @@ If you have questions regarding these Terms of Service, please contact us at sup
                       }
                     },
                     decoration: InputDecoration(
-                      labelText: 'Reset Token (from email)',
+                      labelText: 'Reset code (from email)',
                       hintText: 'e.g. A1B2C3D4',
                       prefixIcon: const Icon(Icons.vpn_key_outlined, color: AppTheme.secondaryCyan),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -580,7 +599,7 @@ If you have questions regarding these Terms of Service, please contact us at sup
                       }
                     },
                     decoration: const InputDecoration(
-                      labelText: 'New Password (min 6 characters)',
+                      labelText: 'New password (min $_minPasswordLength characters)',
                       prefixIcon: Icon(Icons.lock_outline, color: AppTheme.secondaryCyan),
                     ),
                   ),
@@ -598,7 +617,7 @@ If you have questions regarding these Terms of Service, please contact us at sup
                   const SizedBox(height: 6),
                   TextButton.icon(
                     icon: const Icon(Icons.arrow_back, size: 14),
-                    label: const Text('Request different token', style: TextStyle(fontSize: 12)),
+                    label: const Text('Send a new code', style: TextStyle(fontSize: 12)),
                     onPressed: isSubmitting ? null : () => setModalState(() {
                       isResetStage = false;
                       resetErrorText = null;
@@ -631,39 +650,27 @@ If you have questions regarding these Terms of Service, please contact us at sup
                     emailErrorText = null;
                   });
 
-                  final generatedToken = await context.read<AuthProvider>().forgotPassword(email);
+                  final auth = context.read<AuthProvider>();
+                  final ok = await auth.forgotPassword(email);
                   setModalState(() => isSubmitting = false);
+                  if (!ctx.mounted) return;
 
-                  if (generatedToken != null) {
+                  if (ok) {
+                    // Same message whether or not the email has an account (no account discovery).
                     setModalState(() {
                       isResetStage = true;
                       emailErrorText = null;
-                      if (generatedToken.isNotEmpty) {
-                        tokenController.text = generatedToken;
-                      }
+                      resetErrorText = null;
                     });
-                    if (ctx.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            generatedToken.isNotEmpty
-                                ? 'Reset token: $generatedToken (pre-filled below) and sent to your email!'
-                                : 'Reset token sent! Check your email or email log.',
-                          ),
-                          backgroundColor: Colors.green,
-                          duration: const Duration(seconds: 4),
-                        ),
-                      );
-                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('If an account exists for this email, we\'ve sent a reset code. Check your inbox and spam folder.'),
+                        backgroundColor: AppTheme.successGreen,
+                        duration: Duration(seconds: 5),
+                      ),
+                    );
                   } else {
-                    setModalState(() {
-                      final rawErr = context.read<AuthProvider>().errorMessage ?? '';
-                      if (rawErr.toLowerCase().contains('not found') || rawErr.toLowerCase().contains('db')) {
-                        emailErrorText = 'Email is not found in the db';
-                      } else {
-                        emailErrorText = rawErr.isNotEmpty ? rawErr : 'Email is not found in the db';
-                      }
-                    });
+                    setModalState(() => emailErrorText = auth.errorMessage ?? 'We couldn\'t send the reset email. Try again.');
                   }
                 },
                 child: isSubmitting
@@ -672,7 +679,7 @@ If you have questions regarding these Terms of Service, please contact us at sup
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text('Send Reset Token'),
+                    : const Text('Send reset code'),
               )
             else
               ElevatedButton(
@@ -680,11 +687,11 @@ If you have questions regarding these Terms of Service, please contact us at sup
                   final token = tokenController.text.trim();
                   final newPass = newPasswordController.text;
                   if (token.isEmpty) {
-                    setModalState(() => resetErrorText = 'Please enter the reset token');
+                    setModalState(() => resetErrorText = 'Enter the code from the email.');
                     return;
                   }
-                  if (newPass.length < 6) {
-                    setModalState(() => resetErrorText = 'Password must be at least 6 characters');
+                  if (newPass.length < _minPasswordLength) {
+                    setModalState(() => resetErrorText = 'Password must be at least $_minPasswordLength characters.');
                     return;
                   }
 
@@ -700,17 +707,17 @@ If you have questions regarding these Terms of Service, please contact us at sup
                     if (ok) {
                       Navigator.pop(ctx);
                       _loginEmailController.text = emailController.text.trim();
-                      _loginPasswordController.text = newPass;
+                      _loginPasswordController.clear();
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Password updated successfully! Your account is active. Please sign in.'),
+                          content: Text('Password updated. Sign in with your new password.'),
                           backgroundColor: Colors.green,
                           duration: Duration(seconds: 4),
                         ),
                       );
                     } else {
                       setModalState(() {
-                        resetErrorText = context.read<AuthProvider>().errorMessage ?? 'Invalid or expired token';
+                        resetErrorText = context.read<AuthProvider>().errorMessage ?? 'That code is invalid or has expired. Send a new code.';
                       });
                     }
                   }
@@ -806,7 +813,7 @@ If you have questions regarding these Terms of Service, please contact us at sup
                   AnimatedSize(
                     duration: const Duration(milliseconds: 250),
                     child: SizedBox(
-                      height: _tabController.index == 0 ? 340 : (_selectedRole == UserRoleOption.artistProducer ? 800 : 720),
+                      height: _tabController.index == 0 ? 420 : (_selectedRole == UserRoleOption.artistProducer ? 860 : 780),
                       child: TabBarView(
                         controller: _tabController,
                         physics: const NeverScrollableScrollPhysics(),
@@ -871,6 +878,18 @@ If you have questions regarding these Terms of Service, please contact us at sup
                                         : const Text('Log In to Sound Marketplace'),
                                   ),
                                 ),
+                                _errorText(_loginError),
+                                if (auth.needsEmailVerification)
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: TextButton(
+                                      onPressed: () => _showVerificationDialog(
+                                        _loginEmailController.text.trim(),
+                                        password: _loginPasswordController.text,
+                                      ),
+                                      child: const Text('Enter verification code', style: TextStyle(color: AppTheme.secondaryCyan)),
+                                    ),
+                                  ),
                               ],
                             ),
                           ),
@@ -1111,7 +1130,9 @@ If you have questions regarding these Terms of Service, please contact us at sup
                                       onPressed: () => setState(() => _regObscurePassword = !_regObscurePassword),
                                     ),
                                   ),
-                                  validator: (v) => (v == null || v.length < 6) ? 'Password must be at least 6 characters' : null,
+                                  validator: (v) => (v == null || v.length < _minPasswordLength)
+                                      ? 'Password must be at least $_minPasswordLength characters'
+                                      : null,
                                 ),
                                 const SizedBox(height: 14),
 
@@ -1190,6 +1211,7 @@ If you have questions regarding these Terms of Service, please contact us at sup
                                           ),
                                   ),
                                 ),
+                                _errorText(_registerError),
                               ],
                             ),
                           ),
@@ -1199,29 +1221,6 @@ If you have questions regarding these Terms of Service, please contact us at sup
                     ),
                   ),
 
-                  // Quick Demo User Selector for pair-programming and testing
-                  if (auth.allUsers.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    const Divider(color: Colors.white10),
-                    const SizedBox(height: 10),
-                    const Text(
-                      'Or click an existing account to test:',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      alignment: WrapAlignment.center,
-                      children: auth.allUsers.take(4).map((u) {
-                        return ActionChip(
-                          avatar: const Icon(Icons.account_circle, size: 16, color: AppTheme.secondaryCyan),
-                          label: Text('${u.effectiveName} (${u.roles.isNotEmpty ? u.roles.first : "user"})', style: const TextStyle(fontSize: 11)),
-                          onPressed: () => auth.switchUser(u),
-                        );
-                      }).toList(),
-                    ),
-                  ],
                 ],
               ),
             ),

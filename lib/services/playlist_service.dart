@@ -1,16 +1,13 @@
 import '../models/playlist.dart';
 import 'api_client.dart';
+import 'json_utils.dart';
 
 class PlaylistService {
   Future<List<Playlist>> getPublicPlaylists() async {
     final response = await ApiClient.get<List<Playlist>>(
       '/playlists',
-      fromJsonT: (json) {
-        if (json is List) {
-          return json.map((i) => Playlist.fromJson(i as Map<String, dynamic>)).toList();
-        }
-        return [];
-      },
+      fromJsonT: (json) =>
+          extractItems(json).map((i) => Playlist.fromJson(i as Map<String, dynamic>)).toList(),
     );
     return response.data ?? [];
   }
@@ -18,12 +15,8 @@ class PlaylistService {
   Future<List<Playlist>> getUserPlaylists(int userId) async {
     final response = await ApiClient.get<List<Playlist>>(
       '/playlists/user/$userId',
-      fromJsonT: (json) {
-        if (json is List) {
-          return json.map((i) => Playlist.fromJson(i as Map<String, dynamic>)).toList();
-        }
-        return [];
-      },
+      fromJsonT: (json) =>
+          extractItems(json).map((i) => Playlist.fromJson(i as Map<String, dynamic>)).toList(),
     );
     return response.data ?? [];
   }

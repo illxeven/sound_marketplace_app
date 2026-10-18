@@ -39,7 +39,14 @@ dependencies:
   intl: ^0.20.2
   google_fonts: ^6.3.2
   file_picker: ^11.0.3
-  audioplayers: ^6.6.0
+  # Playback: gapless queue + preloading (just_audio), lock-screen / notification
+  # controls and background audio (just_audio_background), audio focus (audio_session).
+  just_audio: ^0.9.42
+  just_audio_background: ^0.0.1-beta.11
+  audio_session: ^0.1.21
+  # Tokens are stored in the OS keychain/keystore, never in SharedPreferences.
+  flutter_secure_storage: ^9.2.2
+  cached_network_image: ^3.4.1
   shared_preferences: ^2.5.3
   flutter_stripe: ^11.5.0
 

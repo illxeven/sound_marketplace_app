@@ -435,7 +435,7 @@ class _CartItemTile extends StatelessWidget {
       if (item.trackCoverUrl != null && item.trackCoverUrl!.isNotEmpty) {
         final fullUrl = item.trackCoverUrl!.startsWith('http')
             ? item.trackCoverUrl!
-            : '${ApiConfig.baseUrl}${item.trackCoverUrl!.startsWith('/') ? item.trackCoverUrl! : '/${item.trackCoverUrl!}'}';
+            : ApiConfig.resolve(item.trackCoverUrl!);
         return Image.network(
           fullUrl,
           fit: BoxFit.cover,

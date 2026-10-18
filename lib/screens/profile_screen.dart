@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -231,9 +232,11 @@ class ProfileScreen extends StatelessWidget {
               ),
             ),
           ),
+          // Developer-only: lets a debug build point at another server. Hidden in release builds.
+          if (kDebugMode)
           IconButton(
             icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Server Settings',
+            tooltip: 'Server Settings (debug)',
             onPressed: () => _showServerSettingsDialog(context),
           ),
           IconButton(
@@ -278,7 +281,7 @@ class ProfileScreen extends StatelessWidget {
                               ? NetworkImage(
                                   user.avatarUrlComputed!.startsWith('http')
                                       ? user.avatarUrlComputed!
-                                      : '${ApiConfig.baseUrl}${user.avatarUrlComputed!.startsWith('/') ? user.avatarUrlComputed! : '/${user.avatarUrlComputed!}'}',
+                                      : ApiConfig.resolve(user.avatarUrlComputed!),
                                 )
                               : null,
                           child: user.avatarUrlComputed == null
@@ -751,7 +754,7 @@ class ProfileScreen extends StatelessWidget {
                               ? NetworkImage(
                                   avatarUrl.startsWith('http')
                                       ? avatarUrl
-                                      : '${ApiConfig.baseUrl}${avatarUrl.startsWith('/') ? avatarUrl : '/$avatarUrl'}',
+                                      : ApiConfig.resolve(avatarUrl),
                                 )
                               : null,
                           child: avatarUrl == null

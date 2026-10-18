@@ -350,33 +350,17 @@ class TrackCard extends StatelessWidget {
   }
 
   Widget _buildArtwork() {
-    // 1. Prominently display cover_image_blob via Image.memory if available
-    if (track.coverImageBlob != null && track.coverImageBlob!.isNotEmpty) {
-      return Image.memory(
-        track.coverImageBlob!,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        errorBuilder: (_, __, ___) => _buildPlaceholder(),
-      );
-    }
-
-    // 2. Fall back to coverUrl via Image.network
-    if (track.coverUrl != null && track.coverUrl!.isNotEmpty) {
-      final fullUrl = track.coverUrl!.startsWith('http')
-          ? track.coverUrl!
-          : '${ApiConfig.baseUrl}${track.coverUrl!.startsWith('/') ? track.coverUrl! : '/${track.coverUrl!}'}';
-      return Image.network(
-        fullUrl,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        errorBuilder: (_, __, ___) => _buildPlaceholder(),
-      );
-    }
-
-    // 3. Fallback gradient placeholder
-    return _buildPlaceholder();
+    // Covers load from their URL (cached); the API no longer sends image bytes in lists.
+    final url = track.coverImageFullUrl;
+    if (url == null) return _buildPlaceholder();
+    return Image.network(
+      url,
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: double.infinity,
+      cacheWidth: 400,
+      errorBuilder: (_, __, ___) => _buildPlaceholder(),
+    );
   }
 
   Widget _buildPlaceholder() {
@@ -410,9 +394,6 @@ class TrackCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () {
-          if (!isCurrent) {
-            context.read<CatalogProvider>().incrementTrackPlays(track.id);
-          }
           audioPlayer.playTrack(
             track,
             playlistQueue: playlistQueue,

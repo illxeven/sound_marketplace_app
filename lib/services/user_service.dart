@@ -1,7 +1,57 @@
 import '../models/user_account.dart';
 import 'api_client.dart';
 
+/// Tokens + user returned by /auth/login and /auth/refresh.
+class AuthSession {
+  final String accessToken;
+  final String refreshToken;
+  final UserAccount user;
+
+  const AuthSession({required this.accessToken, required this.refreshToken, required this.user});
+
+  factory AuthSession.fromJson(Map<String, dynamic> json) => AuthSession(
+        accessToken: json['accessToken'] as String,
+        refreshToken: json['refreshToken'] as String,
+        user: UserAccount.fromJson(json['user'] as Map<String, dynamic>),
+      );
+}
+
 class UserService {
+  /// Checks the password on the server and returns access + refresh tokens.
+  /// Throws [ApiException] with code `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` when applicable.
+  Future<AuthSession> login(String email, String password) async {
+    final response = await ApiClient.post<AuthSession>(
+      '/auth/login',
+      body: {'email': email, 'password': password},
+      fromJsonT: (json) => AuthSession.fromJson(json as Map<String, dynamic>),
+    );
+    if (response.data == null) throw ApiException(response.message ?? 'Sign-in failed');
+    return response.data!;
+  }
+
+  Future<AuthSession> refresh(String refreshToken) async {
+    final response = await ApiClient.post<AuthSession>(
+      '/auth/refresh',
+      body: {'refreshToken': refreshToken},
+      fromJsonT: (json) => AuthSession.fromJson(json as Map<String, dynamic>),
+    );
+    if (response.data == null) throw ApiException('Session expired', statusCode: 401);
+    return response.data!;
+  }
+
+  Future<void> logout(String? refreshToken) async {
+    await ApiClient.post('/auth/logout', body: {if (refreshToken != null) 'refreshToken': refreshToken});
+  }
+
+  Future<UserAccount> me() async {
+    final response = await ApiClient.get<UserAccount>(
+      '/users/me',
+      fromJsonT: (json) => UserAccount.fromJson(json as Map<String, dynamic>),
+    );
+    if (response.data == null) throw ApiException('Could not load your profile');
+    return response.data!;
+  }
+
   Future<List<UserAccount>> getAllUsers() async {
     final response = await ApiClient.get<List<UserAccount>>(
       '/users',
@@ -118,7 +168,7 @@ class UserService {
     String? avatarFilename,
   }) async {
     await ApiClient.postMultipart(
-      '/users/$userId/avatar',
+      '/users/me/avatar',
       fileField: 'avatar',
       filePath: avatarPath,
       fileBytes: avatarBytes,
@@ -134,7 +184,7 @@ class UserService {
     String? country,
   }) async {
     await ApiClient.put(
-      '/users/$userId/profile',
+      '/users/me/profile',
       body: {
         if (displayName != null) 'displayName': displayName,
         if (bio != null) 'bio': bio,
@@ -148,20 +198,12 @@ class UserService {
     required int followerId,
     required int followedId,
   }) async {
-    await ApiClient.post('/users/$followerId/follow/$followedId');
+    await ApiClient.post('/users/me/follow/$followedId');
   }
 
-  Future<String?> forgotPassword(String email) async {
-    final response = await ApiClient.post<dynamic>(
-      '/auth/forgot-password',
-      body: {'email': email},
-      fromJsonT: (json) => json,
-    );
-    if (response.data is Map) {
-      final map = response.data as Map;
-      return map['token']?.toString();
-    }
-    return null;
+  /// Always succeeds for a well-formed email; the server never reveals whether it exists.
+  Future<void> forgotPassword(String email) async {
+    await ApiClient.post('/auth/forgot-password', body: {'email': email});
   }
 
   Future<void> resetPassword(String token, String newPassword) async {
@@ -175,12 +217,13 @@ class UserService {
   }
 
   Future<void> recoverUsername(String email) async {
-    await ApiClient.post('/auth/recover-username?email=$email');
+    await ApiClient.post('/auth/recover-username', queryParameters: {'email': email});
   }
 
   Future<UserAccount> verifyEmail(String token) async {
     final response = await ApiClient.post<UserAccount>(
-      '/auth/verify-email?token=$token',
+      '/auth/verify',
+      queryParameters: {'token': token},
       fromJsonT: (json) => UserAccount.fromJson(json as Map<String, dynamic>),
     );
     if (response.data == null) {
@@ -198,7 +241,7 @@ class UserService {
   }
 
   Future<void> resendVerification(String email) async {
-    await ApiClient.post('/auth/resend-verification?email=$email');
+    await ApiClient.post('/auth/resend-verification', queryParameters: {'email': email});
   }
 
   Future<List<dynamic>> getUserReviews(int userId) async {
@@ -217,9 +260,10 @@ class UserService {
       '/users/$userId/rating',
       fromJsonT: (json) => json,
     );
-    if (response.data is Map && response.data['averageRating'] != null) {
-      return (response.data['averageRating'] as num).toDouble();
-    }
+    // The API returns the average as a bare number (null when there are no reviews).
+    final data = response.data;
+    if (data is num) return data.toDouble();
+    if (data is Map && data['averageRating'] is num) return (data['averageRating'] as num).toDouble();
     return 0.0;
   }
 
@@ -260,6 +304,6 @@ class UserService {
   }
 
   Future<void> deleteUserReview(int reviewId, int reviewerId) async {
-    await ApiClient.delete('/users/reviews/$reviewId?reviewerId=$reviewerId');
+    await ApiClient.delete('/users/reviews/$reviewId');
   }
 }

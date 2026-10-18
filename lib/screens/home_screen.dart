@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../config/theme.dart';
-import '../providers/audio_player_provider.dart';
-import '../providers/catalog_provider.dart';
 import '../widgets/mini_player.dart';
+import 'beats_screen.dart';
 import 'discover_screen.dart';
 import 'marketplace_screen.dart';
 import 'playlists_screen.dart';
@@ -20,24 +18,17 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final catalog = context.read<CatalogProvider>();
-      context.read<AudioPlayerProvider>().onTrackPlayed = (trackId) {
-        catalog.incrementTrackPlays(trackId);
-      };
-    });
-  }
+  static const int _beatsTab = 1;
 
-  final List<Widget> _screens = const [
-    DiscoverScreen(),
-    PlaylistsScreen(),
-    SoundKitsScreen(),
-    MarketplaceScreen(),
-    ProfileScreen(),
+  // Play counts reach the UI through AudioPlayerProvider.onPlayCount (wired in main.dart),
+  // using the server's number, so nothing is counted twice here.
+  late final List<Widget> _screens = [
+    DiscoverScreen(onOpenBeats: () => setState(() => _currentIndex = _beatsTab)),
+    const BeatsScreen(),
+    const PlaylistsScreen(),
+    const SoundKitsScreen(),
+    const MarketplaceScreen(),
+    const ProfileScreen(),
   ];
 
   @override
@@ -87,6 +78,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icon(Icons.music_note_outlined),
                         selectedIcon: Icon(Icons.music_note_rounded),
                         label: Text('Discover'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.graphic_eq_outlined),
+                        selectedIcon: Icon(Icons.graphic_eq_rounded),
+                        label: Text('Beats'),
                       ),
                       NavigationRailDestination(
                         icon: Icon(Icons.queue_music_outlined),
@@ -140,11 +136,18 @@ class _HomeScreenState extends State<HomeScreen> {
             currentIndex: _currentIndex,
             onTap: (val) => setState(() => _currentIndex = val),
             type: BottomNavigationBarType.fixed,
+            selectedFontSize: 11,
+            unselectedFontSize: 10,
             items: const [
               BottomNavigationBarItem(
                 icon: Icon(Icons.music_note_outlined),
                 activeIcon: Icon(Icons.music_note_rounded),
                 label: 'Discover',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.graphic_eq_outlined),
+                activeIcon: Icon(Icons.graphic_eq_rounded),
+                label: 'Beats',
               ),
               BottomNavigationBarItem(
                 icon: Icon(Icons.queue_music_outlined),

@@ -4,7 +4,7 @@ import 'api_client.dart';
 class CartService {
   Future<Cart?> getCart(int userId) async {
     final response = await ApiClient.get<Cart>(
-      '/cart/user/$userId',
+      '/cart/me',
       fromJsonT: (json) => Cart.fromJson(json as Map<String, dynamic>),
     );
     return response.data;
@@ -35,7 +35,7 @@ class CartService {
     required int quantity,
   }) async {
     final response = await ApiClient.put<Cart>(
-      '/cart/user/$userId/items/$cartItemId',
+      '/cart/items/$cartItemId',
       body: {
         'quantity': quantity,
       },
@@ -49,13 +49,13 @@ class CartService {
     required int cartItemId,
   }) async {
     final response = await ApiClient.delete<Cart>(
-      '/cart/user/$userId/items/$cartItemId',
+      '/cart/items/$cartItemId',
       fromJsonT: (json) => Cart.fromJson(json as Map<String, dynamic>),
     );
     return response.data;
   }
 
   Future<void> clearCart(int userId) async {
-    await ApiClient.delete<void>('/cart/user/$userId');
+    await ApiClient.delete<void>('/cart/me');
   }
 }

@@ -204,9 +204,6 @@ class TrackTile extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: () {
-            if (!isCurrent) {
-              context.read<CatalogProvider>().incrementTrackPlays(track.id);
-            }
             audioPlayer.playTrack(
               track,
               playlistQueue: playlistQueue,
@@ -230,7 +227,7 @@ class TrackTile extends StatelessWidget {
                           Image.network(
                             track.coverUrl!.startsWith('http')
                                 ? track.coverUrl!
-                                : '${ApiConfig.baseUrl}${track.coverUrl!.startsWith('/') ? track.coverUrl! : '/${track.coverUrl!}'}',
+                                : ApiConfig.resolve(track.coverUrl!),
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => Container(
                               color: isCurrent ? AppTheme.primaryPurple : Colors.white.withValues(alpha: 0.08),

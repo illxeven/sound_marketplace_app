@@ -1,19 +1,47 @@
 import '../models/album.dart';
 import '../models/track.dart';
 import 'api_client.dart';
+import 'json_utils.dart';
 
 class CatalogService {
+  /// One page of tracks, newest first.
+  Future<PageResult<Track>> getTracksPage({int page = 0, int size = 30, String sort = 'createdAt,desc'}) async {
+    final response = await ApiClient.get<PageResult<Track>>(
+      '/tracks',
+      queryParameters: {'page': page, 'size': size, 'sort': sort},
+      fromJsonT: (json) => PageResult(
+        extractItems(json).map((i) => Track.fromJson(i as Map<String, dynamic>)).toList(),
+        hasNext: pageHasNext(json),
+        page: page,
+      ),
+    );
+    return response.data ?? const PageResult([]);
+  }
+
+  /// Beats for sale (`/api/marketplace/items?category=beats`).
+  Future<List<Track>> getBeats({String? genre, String? search}) async {
+    final response = await ApiClient.get<List<Track>>(
+      '/marketplace/items',
+      queryParameters: {
+        'category': 'beats',
+        if (genre != null && genre.isNotEmpty && genre != 'All') 'genre': genre,
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+      },
+      fromJsonT: (json) => extractItems(json)
+          .map((i) => Track.fromMarketplaceItem(i as Map<String, dynamic>))
+          .toList(),
+    );
+    return response.data ?? [];
+  }
+
+  /// Up to 100 newest tracks (the API caps page size at 100). Prefer [getTracksPage] for lists.
   Future<List<Track>> getAllTracks() async {
     final response = await ApiClient.get<List<Track>>(
       '/tracks',
-      fromJsonT: (json) {
-        if (json is List) {
-          return json
-              .map((i) => Track.fromJson(i as Map<String, dynamic>))
-              .toList();
-        }
-        return [];
-      },
+      queryParameters: const {'page': 0, 'size': 100, 'sort': 'createdAt,desc'},
+      fromJsonT: (json) => extractItems(json)
+          .map((i) => Track.fromJson(i as Map<String, dynamic>))
+          .toList(),
     );
     return response.data ?? [];
   }
@@ -21,14 +49,9 @@ class CatalogService {
   Future<List<Track>> getTracksByGenre(String genre) async {
     final response = await ApiClient.get<List<Track>>(
       '/tracks/genre/$genre',
-      fromJsonT: (json) {
-        if (json is List) {
-          return json
-              .map((i) => Track.fromJson(i as Map<String, dynamic>))
-              .toList();
-        }
-        return [];
-      },
+      fromJsonT: (json) => extractItems(json)
+          .map((i) => Track.fromJson(i as Map<String, dynamic>))
+          .toList(),
     );
     return response.data ?? [];
   }
@@ -49,14 +72,9 @@ class CatalogService {
   Future<List<Track>> getTracksByArtist(int artistId) async {
     final response = await ApiClient.get<List<Track>>(
       '/tracks/artist/$artistId',
-      fromJsonT: (json) {
-        if (json is List) {
-          return json
-              .map((i) => Track.fromJson(i as Map<String, dynamic>))
-              .toList();
-        }
-        return [];
-      },
+      fromJsonT: (json) => extractItems(json)
+          .map((i) => Track.fromJson(i as Map<String, dynamic>))
+          .toList(),
     );
     return response.data ?? [];
   }
@@ -249,14 +267,9 @@ class CatalogService {
   Future<List<Album>> getAllAlbums() async {
     final response = await ApiClient.get<List<Album>>(
       '/albums',
-      fromJsonT: (json) {
-        if (json is List) {
-          return json
-              .map((i) => Album.fromJson(i as Map<String, dynamic>))
-              .toList();
-        }
-        return [];
-      },
+      fromJsonT: (json) => extractItems(json)
+          .map((i) => Album.fromJson(i as Map<String, dynamic>))
+          .toList(),
     );
     return response.data ?? [];
   }

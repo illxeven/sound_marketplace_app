@@ -1,445 +1,282 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../config/theme.dart';
 import '../models/track.dart';
-import '../providers/catalog_provider.dart';
-import '../widgets/track_card.dart';
-import '../config/api_config.dart';
+import '../providers/audio_player_provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/catalog_provider.dart';
+import '../widgets/media_widgets.dart';
 
+/// Discover: greeting + search, genre chips, "Trending" and "New releases" shelves, a
+/// "Beats for sale" shelf, then every track in an endless list.
 class DiscoverScreen extends StatefulWidget {
-  const DiscoverScreen({super.key});
+  const DiscoverScreen({super.key, this.onOpenBeats});
+
+  /// Switches the home tab to Beats ("See all" on the beats shelf).
+  final VoidCallback? onOpenBeats;
 
   @override
   State<DiscoverScreen> createState() => _DiscoverScreenState();
 }
 
 class _DiscoverScreenState extends State<DiscoverScreen> {
-  final TextEditingController _searchController = TextEditingController();
-  final TextEditingController _genreAutocompleteController =
-      TextEditingController();
+  final _search = TextEditingController();
+  final _scroll = ScrollController();
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_maybeLoadMore);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<CatalogProvider>().loadCatalog();
+      final catalog = context.read<CatalogProvider>();
+      if (catalog.allTracks.isEmpty) catalog.loadCatalog();
+      if (catalog.beats.isEmpty) catalog.loadBeats();
     });
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
-    _genreAutocompleteController.dispose();
+    _debounce?.cancel();
+    _scroll.dispose();
+    _search.dispose();
     super.dispose();
+  }
+
+  void _maybeLoadMore() {
+    if (_scroll.position.pixels > _scroll.position.maxScrollExtent * 0.8) {
+      context.read<CatalogProvider>().loadMoreTracks();
+    }
+  }
+
+  void _onSearchChanged(String q) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) context.read<CatalogProvider>().setSearchQuery(q);
+    });
+  }
+
+  void _play(Track t, List<Track> list) => context.read<AudioPlayerProvider>().playTrack(t, playlistQueue: list);
+
+  String _greeting() {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
   }
 
   @override
   Widget build(BuildContext context) {
+    final catalog = context.watch<CatalogProvider>();
+    final name = context.select<AuthProvider, String?>((a) => a.currentUser?.effectiveName);
+    final filtering = catalog.searchQuery.trim().isNotEmpty || catalog.selectedGenre != null;
+    final results = catalog.tracks;
+    final cardWidth = MediaQuery.sizeOf(context).width >= 900 ? 180.0 : 150.0;
+
     return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryPurple.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.graphic_eq_rounded,
-                color: AppTheme.secondaryCyan,
-                size: 24,
-              ),
-            ),
-            const SizedBox(width: 10),
-            const Text('Sound Marketplace'),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Refresh Catalog',
-            onPressed: () => context.read<CatalogProvider>().loadCatalog(),
-          ),
-          Consumer<AuthProvider>(
-            builder: (context, auth, _) {
-              final user = auth.currentUser;
-              if (user == null) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(right: 12, left: 4),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.cardColor,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+      body: SafeArea(
+        child: RefreshIndicator(
+          color: AppTheme.secondaryCyan,
+          onRefresh: () async {
+            await Future.wait([catalog.loadCatalog(), catalog.loadBeats()]);
+          },
+          child: CustomScrollView(
+            controller: _scroll,
+            slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      CircleAvatar(
-                        radius: 12,
-                        backgroundColor: AppTheme.primaryPurple,
-                        backgroundImage: (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
-                            ? NetworkImage(
-                                user.avatarUrl!.startsWith('http')
-                                    ? user.avatarUrl!
-                                    : '${ApiConfig.baseUrl}${user.avatarUrl!.startsWith('/') ? user.avatarUrl! : '/${user.avatarUrl!}'}',
-                              )
-                            : null,
-                        child: (user.avatarUrl == null || user.avatarUrl!.isEmpty)
-                            ? Text(
-                                user.displayName?.isNotEmpty == true
-                                    ? user.displayName![0].toUpperCase()
-                                    : user.email[0].toUpperCase(),
-                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-                              )
-                            : null,
-                      ),
-                      const SizedBox(width: 6),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 90),
-                        child: Text(
-                          user.effectiveName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                      Text(_greeting(), style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                      Text(name ?? 'Discover',
+                          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _search,
+                        onChanged: _onSearchChanged,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Search songs, artists, genres',
+                          prefixIcon: const Icon(Icons.search_rounded),
+                          suffixIcon: _search.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear search',
+                                  icon: const Icon(Icons.close_rounded),
+                                  onPressed: () {
+                                    _search.clear();
+                                    catalog.setSearchQuery('');
+                                    setState(() {});
+                                  },
+                                ),
+                          filled: true,
+                          fillColor: AppTheme.surfaceColor,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: BorderSide.none),
                         ),
                       ),
                     ],
                   ),
                 ),
-              );
-            },
-          ),
-        ],
-      ),
-      body: Consumer<CatalogProvider>(
-        builder: (context, catalog, child) {
-          final isFiltering =
-              _searchController.text.trim().isNotEmpty ||
-              (catalog.selectedGenre != null && catalog.selectedGenre != 'All');
-
-          final List<Track> allTracks = catalog.tracks;
-          final List<Track> recommendedTracks = allTracks.take(8).toList();
-
-          return RefreshIndicator(
-            color: AppTheme.primaryPurple,
-            onRefresh: catalog.loadCatalog,
-            child: CustomScrollView(
-              slivers: [
-                // Search Field
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search tracks, artists, genres...',
-                        prefixIcon: const Icon(
-                          Icons.search,
-                          color: Colors.white54,
-                        ),
-                        suffixIcon:
-                            _searchController.text.isNotEmpty
-                                ? IconButton(
-                                  icon: const Icon(
-                                    Icons.clear,
-                                    color: Colors.white54,
-                                  ),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    catalog.setSearchQuery('');
-                                  },
-                                )
-                                : null,
-                      ),
-                      onChanged: catalog.setSearchQuery,
-                    ),
-                  ),
+              ),
+              SliverToBoxAdapter(child: _GenreChips(catalog: catalog)),
+              if (catalog.errorMessage != null && catalog.allTracks.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _ErrorState(message: catalog.errorMessage!, onRetry: catalog.loadCatalog),
+                )
+              else if (catalog.isLoading && catalog.allTracks.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(child: CircularProgressIndicator(color: AppTheme.secondaryCyan)),
+                )
+              else if (filtering) ...[
+                _SectionHeader(title: results.isEmpty ? 'No matches' : '${results.length} results'),
+                SliverList.builder(
+                  itemCount: results.length,
+                  itemBuilder: (_, i) => TrackRow(track: results[i], onTap: () => _play(results[i], results)),
                 ),
-
-                // Autocomplete Genre Dropdown Selector
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Autocomplete<String>(
-                      optionsBuilder: (TextEditingValue textEditingValue) {
-                        if (textEditingValue.text == '') {
-                          return catalog.availableGenres;
-                        }
-                        return catalog.availableGenres.where((String genre) {
-                          return genre.toLowerCase().contains(
-                            textEditingValue.text.toLowerCase(),
-                          );
-                        });
-                      },
-                      onSelected: (String selection) {
-                        catalog.setGenre(selection);
-                      },
-                      fieldViewBuilder: (
-                        context,
-                        textEditingController,
-                        focusNode,
-                        onFieldSubmitted,
-                      ) {
-                        // Sync controller if provider value changes externally
-                        if (textEditingController.text.isEmpty &&
-                            catalog.selectedGenre != null) {
-                          textEditingController.text = catalog.selectedGenre!;
-                        }
-                        return TextField(
-                          controller: textEditingController,
-                          focusNode: focusNode,
-                          decoration: InputDecoration(
-                            labelText: 'Filter by Genre',
-                            hintText: 'Select or type a genre...',
-                            prefixIcon: const Icon(
-                              Icons.filter_list_rounded,
-                              color: AppTheme.secondaryCyan,
-                            ),
-                            suffixIcon: IconButton(
-                              icon: const Icon(
-                                Icons.clear,
-                                color: Colors.white54,
-                              ),
-                              onPressed: () {
-                                textEditingController.clear();
-                                catalog.setGenre('All');
-                              },
-                            ),
-                          ),
-                        );
-                      },
-                      optionsViewBuilder: (context, onSelected, options) {
-                        return Align(
-                          alignment: Alignment.topLeft,
-                          child: Material(
-                            elevation: 4.0,
-                            color: const Color(0xFF1E1E2C),
-                            borderRadius: BorderRadius.circular(8),
-                            child: SizedBox(
-                              height: 200,
-                              width: 300,
-                              child: ListView.builder(
-                                padding: const EdgeInsets.all(8.0),
-                                itemCount: options.length,
-                                itemBuilder: (BuildContext context, int index) {
-                                  final String option = options.elementAt(
-                                    index,
-                                  );
-                                  return ListTile(
-                                    title: Text(
-                                      option,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    onTap: () {
-                                      onSelected(option);
-                                    },
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                const SliverToBoxAdapter(child: SizedBox(height: 16)),
-
-                // Loading State
-                if (catalog.isLoading)
-                  const SliverFillRemaining(
-                    child: Center(
-                      child: CircularProgressIndicator(
-                        color: AppTheme.primaryPurple,
-                      ),
-                    ),
-                  )
-                // Error State
-                else if (catalog.errorMessage != null && catalog.tracks.isEmpty)
-                  SliverFillRemaining(
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.cloud_off_rounded,
-                              size: 48,
-                              color: Colors.white38,
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              catalog.errorMessage!,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            ElevatedButton(
-                              onPressed: catalog.loadCatalog,
-                              child: const Text('Retry Connection'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  )
-                // Empty State
-                else if (catalog.tracks.isEmpty)
-                  SliverFillRemaining(
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.music_off_rounded,
-                            size: 48,
-                            color: Colors.white24,
-                          ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'No tracks found',
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          TextButton(
-                            onPressed: () {
-                              _searchController.clear();
-                              _genreAutocompleteController.clear();
-                              catalog.setGenre('All');
-                              catalog.setSearchQuery('');
-                            },
-                            child: const Text('Clear Filters'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                // Content with "More of what you like" and Responsive Grid
-                else ...[
-                  // 1. "More of what you like" Carousel
-                  if (!isFiltering && recommendedTracks.isNotEmpty) ...[
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.auto_awesome_rounded,
-                              color: AppTheme.secondaryCyan,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'More of what you like',
-                              style: Theme.of(
-                                context,
-                              ).textTheme.titleLarge?.copyWith(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    SliverToBoxAdapter(
-                      child: SizedBox(
-                        height: 245,
-                        child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          scrollDirection: Axis.horizontal,
-                          itemCount: recommendedTracks.length,
-                          separatorBuilder:
-                              (ctx, i) => const SizedBox(width: 14),
-                          itemBuilder: (context, index) {
-                            final track = recommendedTracks[index];
-                            return SizedBox(
-                              width: 152,
-                              child: TrackCard(
-                                track: track,
-                                playlistQueue: allTracks,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                  ],
-
-                  // 2. Main Discovery Grid Header
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            isFiltering
-                                ? (catalog.selectedGenre != null &&
-                                        catalog.selectedGenre != 'All'
-                                    ? '${catalog.selectedGenre} Tracks'
-                                    : 'Search Results')
-                                : 'Explore All Sounds',
-                            style: Theme.of(
-                              context,
-                            ).textTheme.titleLarge?.copyWith(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Text(
-                            '${allTracks.length} tracks',
-                            style: const TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // 3. Responsive Grid Layout of Square Track Cards
-                  SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    sliver: SliverGrid(
-                      gridDelegate:
-                          const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 190,
-                            mainAxisSpacing: 16,
-                            crossAxisSpacing: 14,
-                            childAspectRatio: 0.69,
-                          ),
-                      delegate: SliverChildBuilderDelegate((context, index) {
-                        final track = allTracks[index];
-                        return TrackCard(
-                          track: track,
-                          playlistQueue: allTracks,
-                        );
-                      }, childCount: allTracks.length),
-                    ),
-                  ),
+              ] else ...[
+                if (catalog.trendingTracks.isNotEmpty) ...[
+                  const _SectionHeader(title: 'Trending now'),
+                  _Shelf(tracks: catalog.trendingTracks, cardWidth: cardWidth, onPlay: _play),
                 ],
-
-                const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                if (catalog.allTracks.isNotEmpty) ...[
+                  const _SectionHeader(title: 'New releases'),
+                  _Shelf(tracks: catalog.allTracks.take(12).toList(), cardWidth: cardWidth, onPlay: _play),
+                ],
+                if (catalog.beats.isNotEmpty) ...[
+                  _SectionHeader(title: 'Beats for sale', onSeeAll: widget.onOpenBeats),
+                  _Shelf(tracks: catalog.beats.take(12).toList(), cardWidth: cardWidth, onPlay: _play, showPrice: true),
+                ],
+                const _SectionHeader(title: 'All tracks'),
+                SliverList.builder(
+                  itemCount: catalog.allTracks.length,
+                  itemBuilder: (_, i) => TrackRow(
+                    track: catalog.allTracks[i],
+                    index: i,
+                    onTap: () => _play(catalog.allTracks[i], catalog.allTracks),
+                  ),
+                ),
+                if (catalog.isLoadingMore)
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                    ),
+                  ),
               ],
-            ),
+              const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GenreChips extends StatelessWidget {
+  const _GenreChips({required this.catalog});
+  final CatalogProvider catalog;
+
+  @override
+  Widget build(BuildContext context) {
+    final genres = catalog.availableGenres;
+    final selected = catalog.selectedGenre ?? 'All';
+    return SizedBox(
+      height: 46,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        itemCount: genres.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final g = genres[i];
+          final isSel = g == selected;
+          return ChoiceChip(
+            label: Text(g),
+            selected: isSel,
+            onSelected: (_) => catalog.setGenre(g),
+            selectedColor: AppTheme.secondaryCyan,
+            labelStyle: TextStyle(color: isSel ? Colors.black : AppTheme.textPrimary, fontWeight: FontWeight.w600),
+            backgroundColor: AppTheme.surfaceColor,
+            side: BorderSide.none,
+            shape: const StadiumBorder(),
+            showCheckmark: false,
           );
         },
       ),
     );
   }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, this.onSeeAll});
+  final String title;
+  final VoidCallback? onSeeAll;
+
+  @override
+  Widget build(BuildContext context) => SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 18, 8, 8),
+          child: Row(
+            children: [
+              Expanded(child: Text(title, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800))),
+              if (onSeeAll != null) TextButton(onPressed: onSeeAll, child: const Text('See all')),
+            ],
+          ),
+        ),
+      );
+}
+
+class _Shelf extends StatelessWidget {
+  const _Shelf({required this.tracks, required this.cardWidth, required this.onPlay, this.showPrice = false});
+  final List<Track> tracks;
+  final double cardWidth;
+  final void Function(Track, List<Track>) onPlay;
+  final bool showPrice;
+
+  @override
+  Widget build(BuildContext context) => SliverToBoxAdapter(
+        child: SizedBox(
+          height: cardWidth + 72,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: tracks.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 14),
+            itemBuilder: (_, i) => MediaCard(
+              track: tracks[i],
+              width: cardWidth,
+              showPrice: showPrice,
+              onTap: () => onPlay(tracks[i], tracks),
+            ),
+          ),
+        ),
+      );
+}
+
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.message, required this.onRetry});
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.wifi_off_rounded, size: 48, color: AppTheme.textSecondary),
+            const SizedBox(height: 12),
+            Text(message, textAlign: TextAlign.center, style: const TextStyle(color: Colors.redAccent)),
+            const SizedBox(height: 12),
+            OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+          ],
+        ),
+      );
 }

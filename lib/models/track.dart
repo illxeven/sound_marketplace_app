@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 import '../config/api_config.dart';
 
@@ -55,19 +54,15 @@ class Track {
 
   bool get isFree => price <= 0.0;
 
-  String? get coverUrl => (hasCoverImage == true)
-      ? (coverImageUrl ?? '/tracks/$id/cover')
-      : coverImageUrl;
+  /// Server path of the cover image (`/api/tracks/{id}/cover`); turn into a URL with
+  /// [coverImageFullUrl] or `ApiConfig.resolve`.
+  String? get coverUrl => coverImageUrl ?? (hasCoverImage == true ? '/api/tracks/$id/cover' : null);
 
-  String get streamUrl {
-    if (filePath != null &&
-        (filePath!.startsWith('http://') || filePath!.startsWith('https://'))) {
-      return filePath!;
-    }
-    String base = ApiConfig.baseUrl;
-    if (base.endsWith('/')) base = base.substring(0, base.length - 1);
-    return '$base/tracks/$id/stream';
-  }
+  /// Absolute cover URL, or null when the track has no artwork.
+  String? get coverImageFullUrl => ApiConfig.resolveOrNull(coverUrl);
+
+  bool get isBeat =>
+      (genre ?? '').toLowerCase().contains('beat') || title.toLowerCase().contains('beat');
 
   String get artistDisplay {
     if (artistName != null && artistName!.trim().isNotEmpty) {
@@ -101,50 +96,47 @@ class Track {
     return base;
   }
 
-  static Uint8List? _parseBlob(dynamic val) {
-    if (val == null) return null;
-    if (val is Uint8List) return val;
-    if (val is List<int>) return Uint8List.fromList(val);
-    if (val is List) {
-      try {
-        return Uint8List.fromList(val.map((e) => (e as num).toInt()).toList());
-      } catch (_) {}
-    }
-    if (val is String && val.isNotEmpty) {
-      try {
-        String clean = val;
-        if (clean.contains(',')) {
-          clean = clean.split(',').last;
-        }
-        return base64Decode(clean);
-      } catch (_) {}
-    }
-    return null;
-  }
-
+  /// Parses both the v2 list shape (TrackSummaryDTO: playCount, likeCount, coverUrl) and the
+  /// detail/legacy shape (playsCount, likesCount, coverImageUrl). Image and video bytes are never
+  /// read from JSON: covers load from their URL, which is cached and much smaller.
   factory Track.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic v) => v is num ? v.toInt() : (v is String ? int.tryParse(v) ?? 0 : 0);
     return Track(
-      id: json['id'] as int,
-      artistId: json['artistId'] as int? ?? 0,
+      id: toInt(json['id']),
+      artistId: toInt(json['artistId']),
       artistEmail: json['artistEmail'] as String?,
       artistName: json['artistName'] as String?,
       features: json['features'] as String?,
-      albumId: json['albumId'] as int?,
+      albumId: json['albumId'] is num ? (json['albumId'] as num).toInt() : null,
       albumTitle: json['albumTitle'] as String?,
       title: json['title'] as String? ?? 'Untitled Track',
       filePath: json['filePath'] as String?,
-      genre: json['genre'] as String? ?? 'Electronic',
-      durationSeconds: json['durationSeconds'] as int?,
+      genre: json['genre'] as String?,
+      durationSeconds: json['durationSeconds'] is num ? (json['durationSeconds'] as num).toInt() : null,
       isPromoted: json['isPromoted'] as bool? ?? false,
-      price: (json['price'] != null) ? (json['price'] as num).toDouble() : 0.0,
-      hasCoverImage: json['hasCoverImage'] as bool?,
-      coverImageUrl: json['coverImageUrl'] as String?,
-      coverImageBlob: _parseBlob(json['cover_image_blob'] ?? json['coverImageBlob']),
-      likesCount: (json['likesCount'] as num?)?.toInt() ?? 0,
-      playsCount: (json['playsCount'] as num?)?.toInt() ?? 0,
+      price: json['price'] is num ? (json['price'] as num).toDouble() : double.tryParse('${json['price'] ?? 0}') ?? 0.0,
+      hasCoverImage: json['hasCoverImage'] as bool? ?? (json['coverUrl'] != null || json['coverImageUrl'] != null),
+      coverImageUrl: (json['coverUrl'] ?? json['coverImageUrl'] ?? json['coverArtUrl']) as String?,
+      likesCount: toInt(json['likeCount'] ?? json['likesCount']),
+      playsCount: toInt(json['playCount'] ?? json['playsCount']),
       videoFilePath: json['videoFilePath'] as String?,
-      videoBlob: _parseBlob(json['video_blob'] ?? json['videoBlob']),
       mediaType: json['mediaType'] as String? ?? 'AUDIO',
+      createdAt: json['createdAt'] != null ? DateTime.tryParse(json['createdAt'].toString()) : null,
+    );
+  }
+
+  /// A beat listing from `/api/marketplace/items?category=beats` (MarketplaceItemDTO).
+  factory Track.fromMarketplaceItem(Map<String, dynamic> json) {
+    int toInt(dynamic v) => v is num ? v.toInt() : (v is String ? int.tryParse(v) ?? 0 : 0);
+    return Track(
+      id: toInt(json['id']),
+      artistId: toInt(json['sellerId']),
+      artistName: json['sellerName'] as String?,
+      title: json['title'] as String? ?? 'Untitled Beat',
+      genre: json['genre'] as String?,
+      price: json['price'] is num ? (json['price'] as num).toDouble() : double.tryParse('${json['price'] ?? 0}') ?? 0.0,
+      coverImageUrl: json['coverArtUrl'] as String?,
+      hasCoverImage: json['coverArtUrl'] != null,
       createdAt: json['createdAt'] != null ? DateTime.tryParse(json['createdAt'].toString()) : null,
     );
   }
@@ -216,11 +208,9 @@ class Track {
       'price': price,
       'hasCoverImage': hasCoverImage,
       'coverImageUrl': coverImageUrl,
-      'coverImageBlob': coverImageBlob != null ? base64Encode(coverImageBlob!) : null,
       'likesCount': likesCount,
       'playsCount': playsCount,
       'videoFilePath': videoFilePath,
-      'videoBlob': videoBlob != null ? base64Encode(videoBlob!) : null,
       'mediaType': mediaType,
       'createdAt': createdAt?.toIso8601String(),
     };
