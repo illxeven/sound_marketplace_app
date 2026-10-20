@@ -5,6 +5,7 @@
 List<dynamic> extractItems(dynamic json) {
   if (json is List) return json;
   if (json is Map && json['items'] is List) return json['items'] as List;
+  if (json is Map && json['content'] is List) return json['content'] as List;
   return const [];
 }
 

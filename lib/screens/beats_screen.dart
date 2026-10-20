@@ -1,3 +1,4 @@
+import '../widgets/universal_app_header.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,11 +11,12 @@ import '../providers/audio_player_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/cart_provider.dart';
 import '../providers/catalog_provider.dart';
+import '../widgets/comment_bottom_sheet.dart';
 import '../widgets/media_widgets.dart';
 import 'cart_screen.dart';
 
-/// Beats for sale: preview, like, queue and add to cart.
-/// Grid on wide screens, list on phones; the beat that is playing is highlighted.
+/// Beats for sale: preview, like, queue, comment and add to cart.
+/// Bloomee-inspired sleek cover cards, play indicators, and clean responsive grid.
 class BeatsScreen extends StatefulWidget {
   const BeatsScreen({super.key});
 
@@ -54,7 +56,12 @@ class _BeatsScreenState extends State<BeatsScreen> {
 
   Future<void> _addToCart(Track beat) async {
     final user = context.read<AuthProvider>().currentUser;
-    if (user == null) return;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to add beats to your cart')),
+      );
+      return;
+    }
     final cart = context.read<CartProvider>();
     final ok = await cart.addToCart(userId: user.id, trackId: beat.id);
     if (!mounted) return;
@@ -75,12 +82,12 @@ class _BeatsScreenState extends State<BeatsScreen> {
     final catalog = context.watch<CatalogProvider>();
     final beats = catalog.beats;
     final width = MediaQuery.sizeOf(context).width;
-    final columns = width >= 1200 ? 5 : (width >= 900 ? 4 : (width >= 600 ? 3 : 0));
+    final columns = width >= 1200 ? 5 : (width >= 900 ? 4 : (width >= 600 ? 3 : 2));
     final genres = <String>{'All', ...beats.map((b) => b.genre).whereType<String>()}.toList();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Beats', style: TextStyle(fontWeight: FontWeight.w900)),
+      appBar: UniversalAppHeader(
+        title: 'Beats',
         actions: [
           Consumer<CartProvider>(
             builder: (context, cart, _) => Badge(
@@ -103,7 +110,7 @@ class _BeatsScreenState extends State<BeatsScreen> {
           slivers: [
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
                 child: TextField(
                   controller: _search,
                   onChanged: _onSearch,
@@ -112,6 +119,7 @@ class _BeatsScreenState extends State<BeatsScreen> {
                     prefixIcon: const Icon(Icons.search_rounded),
                     filled: true,
                     fillColor: AppTheme.surfaceColor,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: BorderSide.none),
                   ),
                 ),
@@ -119,10 +127,10 @@ class _BeatsScreenState extends State<BeatsScreen> {
             ),
             SliverToBoxAdapter(
               child: SizedBox(
-                height: 46,
+                height: 48,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   itemCount: genres.length,
                   separatorBuilder: (_, __) => const SizedBox(width: 8),
                   itemBuilder: (_, i) {
@@ -136,7 +144,11 @@ class _BeatsScreenState extends State<BeatsScreen> {
                       backgroundColor: AppTheme.surfaceColor,
                       side: BorderSide.none,
                       shape: const StadiumBorder(),
-                      labelStyle: TextStyle(color: sel ? Colors.black : AppTheme.textPrimary, fontWeight: FontWeight.w600),
+                      labelStyle: TextStyle(
+                        color: sel ? Colors.black : AppTheme.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                      ),
                       onSelected: (_) {
                         setState(() => _genre = g);
                         _reload();
@@ -146,6 +158,7 @@ class _BeatsScreenState extends State<BeatsScreen> {
                 ),
               ),
             ),
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
             if (catalog.isLoadingBeats && beats.isEmpty)
               const SliverFillRemaining(
                 hasScrollBody: false,
@@ -158,45 +171,28 @@ class _BeatsScreenState extends State<BeatsScreen> {
                   child: Text('No beats match your filters yet.', style: TextStyle(color: AppTheme.textSecondary)),
                 ),
               )
-            else if (columns == 0)
-              SliverList.builder(
-                itemCount: beats.length,
-                itemBuilder: (_, i) => TrackRow(
-                  track: beats[i],
-                  showPrice: true,
-                  onTap: () => context.read<AudioPlayerProvider>().playTrack(beats[i], playlistQueue: beats),
-                  trailing: _BuyButton(beat: beats[i], onAdd: () => _addToCart(beats[i])),
-                ),
-              )
             else
               SliverPadding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 sliver: SliverGrid.builder(
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: columns,
-                    mainAxisSpacing: 20,
-                    crossAxisSpacing: 16,
-                    childAspectRatio: 0.58,
+                    mainAxisSpacing: 16,
+                    crossAxisSpacing: 14,
+                    childAspectRatio: width < 600 ? 0.64 : 0.68,
                   ),
                   itemCount: beats.length,
-                  itemBuilder: (_, i) => LayoutBuilder(
-                    builder: (context, c) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        MediaCard(
-                          track: beats[i],
-                          width: c.maxWidth,
-                          showPrice: true,
-                          onTap: () => context.read<AudioPlayerProvider>().playTrack(beats[i], playlistQueue: beats),
-                        ),
-                        const SizedBox(height: 6),
-                        _BuyButton(beat: beats[i], onAdd: () => _addToCart(beats[i]), expanded: true),
-                      ],
-                    ),
-                  ),
+                  itemBuilder: (_, i) {
+                    final beat = beats[i];
+                    return BloomeeBeatCard(
+                      beat: beat,
+                      onPlay: () => context.read<AudioPlayerProvider>().playTrack(beat, playlistQueue: beats),
+                      onAddToCart: () => _addToCart(beat),
+                    );
+                  },
                 ),
               ),
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            const SliverToBoxAdapter(child: SizedBox(height: 28)),
           ],
         ),
       ),
@@ -204,25 +200,198 @@ class _BeatsScreenState extends State<BeatsScreen> {
   }
 }
 
-class _BuyButton extends StatelessWidget {
-  const _BuyButton({required this.beat, required this.onAdd, this.expanded = false});
+/// BloomeeTunes-inspired bold cover card with corner tag, play indicator badge, and clean action row.
+class BloomeeBeatCard extends StatelessWidget {
+  const BloomeeBeatCard({
+    super.key,
+    required this.beat,
+    required this.onPlay,
+    required this.onAddToCart,
+  });
+
   final Track beat;
-  final VoidCallback onAdd;
-  final bool expanded;
+  final VoidCallback onPlay;
+  final VoidCallback onAddToCart;
 
   @override
   Widget build(BuildContext context) {
-    final label = beat.isFree ? 'Free' : NumberFormat.simpleCurrency().format(beat.price);
-    final button = FilledButton.icon(
-      style: FilledButton.styleFrom(
-        backgroundColor: AppTheme.primaryPurple,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        visualDensity: VisualDensity.compact,
+    final isCurrent = context.select<AudioPlayerProvider, bool>((p) => p.currentTrack?.id == beat.id);
+    final isPlaying = context.select<AudioPlayerProvider, bool>((p) => p.currentTrack?.id == beat.id && p.isPlaying);
+    final priceLabel = beat.isFree ? 'Free' : NumberFormat.simpleCurrency().format(beat.price);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onPlay,
+      onLongPress: () => showTrackActions(context, beat),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isCurrent ? AppTheme.secondaryCyan.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.06),
+            width: isCurrent ? 1.5 : 1.0,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Bold cover artwork with Bloomee corner tag and circular play badge
+            AspectRatio(
+              aspectRatio: 1.0,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CoverImage(url: beat.coverImageFullUrl, radius: 14),
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.65),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Bloomee tag pill (Top Left Price)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: beat.isFree ? AppTheme.successGreen : AppTheme.primaryPurple,
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: const [
+                            BoxShadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1)),
+                          ],
+                        ),
+                        child: Text(
+                          priceLabel,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Optional Genre/Tag (Top Right)
+                    if (beat.genre != null && beat.genre!.isNotEmpty)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.7),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Text(
+                            beat.genre!,
+                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.white70),
+                          ),
+                        ),
+                      ),
+                    // Floating circular play indicator (Bloomee style)
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: GestureDetector(
+                        onTap: onPlay,
+                        child: Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isCurrent ? AppTheme.secondaryCyan : Colors.white.withValues(alpha: 0.95),
+                            boxShadow: [
+                              BoxShadow(
+                                color: (isCurrent ? AppTheme.secondaryCyan : Colors.black).withValues(alpha: 0.4),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: isPlaying
+                                ? const PlayingBars(color: Colors.black, size: 16)
+                                : const Icon(Icons.play_arrow_rounded, color: Colors.black, size: 24),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 9),
+            // Title
+            Text(
+              beat.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 13.5,
+                color: isCurrent ? AppTheme.secondaryCyan : AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 2),
+            // Producer/Artist
+            Text(
+              beat.artistDisplay,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textSecondary.withValues(alpha: 0.85),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const Spacer(),
+            // Clean action row: TrackStats, Comment icon, Add to Cart
+            Row(
+              children: [
+                Expanded(
+                  child: TrackStats(trackId: beat.id, compact: true),
+                ),
+                IconButton(
+                  tooltip: 'Comments & replies',
+                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  color: AppTheme.textSecondary,
+                  onPressed: () => CommentBottomSheet.show(context, beat),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: beat.isFree ? 'Free beat' : 'Add to cart',
+                  icon: const Icon(Icons.add_shopping_cart_rounded, size: 18),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  color: beat.isFree ? Colors.white24 : AppTheme.secondaryCyan,
+                  onPressed: beat.isFree ? null : onAddToCart,
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
-      onPressed: beat.isFree ? null : onAdd,
-      icon: const Icon(Icons.add_shopping_cart_rounded, size: 16),
-      label: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
     );
-    return expanded ? SizedBox(width: double.infinity, child: button) : button;
   }
 }

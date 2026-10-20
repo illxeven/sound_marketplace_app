@@ -4,16 +4,15 @@ import '../models/merchandise.dart';
 import '../models/merchandise_review.dart';
 import '../models/payment_history.dart';
 import 'api_client.dart';
+import 'json_utils.dart';
 
 class MarketplaceService {
   Future<List<Merchandise>> getAllMerchandise() async {
     final response = await ApiClient.get<List<Merchandise>>(
       '/merchandise',
       fromJsonT: (json) {
-        if (json is List) {
-          return json.map((i) => Merchandise.fromJson(i as Map<String, dynamic>)).toList();
-        }
-        return [];
+        final list = extractItems(json);
+        return list.map((i) => Merchandise.fromJson(i as Map<String, dynamic>)).toList();
       },
     );
     return response.data ?? [];
@@ -31,10 +30,8 @@ class MarketplaceService {
     final response = await ApiClient.get<List<Merchandise>>(
       '/merchandise/seller/$sellerId',
       fromJsonT: (json) {
-        if (json is List) {
-          return json.map((i) => Merchandise.fromJson(i as Map<String, dynamic>)).toList();
-        }
-        return [];
+        final list = extractItems(json);
+        return list.map((i) => Merchandise.fromJson(i as Map<String, dynamic>)).toList();
       },
     );
     return response.data ?? [];

@@ -81,7 +81,9 @@ class MarketplaceProvider extends ChangeNotifier {
 
   Future<List<Merchandise>> getMerchandiseBySeller(int sellerId) async {
     try {
-      return await _marketplaceService.getMerchandiseBySeller(sellerId);
+      final items = await _marketplaceService.getMerchandiseBySeller(sellerId);
+      if (items.isNotEmpty) return items;
+      return _merchandiseList.where((m) => m.sellerId == sellerId).toList();
     } catch (e) {
       return _merchandiseList.where((m) => m.sellerId == sellerId).toList();
     }

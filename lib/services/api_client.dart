@@ -98,7 +98,7 @@ class ApiClient {
 
   static Future<ApiResponse<T>> post<T>(
     String path, {
-    Map<String, dynamic>? body,
+    Object? body,
     Map<String, dynamic>? queryParameters,
     T Function(dynamic json)? fromJsonT,
   }) =>
@@ -106,7 +106,7 @@ class ApiClient {
 
   static Future<ApiResponse<T>> put<T>(
     String path, {
-    Map<String, dynamic>? body,
+    Object? body,
     Map<String, dynamic>? queryParameters,
     T Function(dynamic json)? fromJsonT,
   }) =>

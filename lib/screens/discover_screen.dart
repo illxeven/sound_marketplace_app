@@ -1,3 +1,4 @@
+import '../config/api_config.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -71,10 +72,12 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   @override
   Widget build(BuildContext context) {
     final catalog = context.watch<CatalogProvider>();
-    final name = context.select<AuthProvider, String?>((a) => a.currentUser?.effectiveName);
+    final user = context.watch<AuthProvider>().currentUser;
+    final name = user?.effectiveName;
     final filtering = catalog.searchQuery.trim().isNotEmpty || catalog.selectedGenre != null;
     final results = catalog.tracks;
-    final cardWidth = MediaQuery.sizeOf(context).width >= 900 ? 180.0 : 150.0;
+    // Increased card width to match the larger featured card style from the reference view
+    final cardWidth = MediaQuery.sizeOf(context).width >= 900 ? 260.0 : 210.0;
 
     return Scaffold(
       body: SafeArea(
@@ -92,9 +95,49 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(_greeting(), style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
-                      Text(name ?? 'Discover',
-                          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(_greeting(), style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                                Text(name ?? 'Discover',
+                                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                              ],
+                            ),
+                          ),
+                          if (user != null)
+                            Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: AppTheme.secondaryCyan.withValues(alpha: 0.5), width: 2),
+                              ),
+                              child: CircleAvatar(
+                                radius: 22,
+                                backgroundColor: AppTheme.primaryPurple,
+                                backgroundImage: (user.avatarUrlComputed != null && user.avatarUrlComputed!.isNotEmpty)
+                                    ? NetworkImage(
+                                        user.avatarUrlComputed!.startsWith('http')
+                                            ? user.avatarUrlComputed!
+                                            : ApiConfig.resolve(user.avatarUrlComputed!),
+                                      )
+                                    : null,
+                                child: (user.avatarUrlComputed == null || user.avatarUrlComputed!.isEmpty)
+                                    ? Text(
+                                        user.displayName?.isNotEmpty == true
+                                            ? user.displayName![0].toUpperCase()
+                                            : user.email[0].toUpperCase(),
+                                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                                      )
+                                    : null,
+                              ),
+                            ),
+                        ],
+                      ),
                       const SizedBox(height: 14),
                       TextField(
                         controller: _search,
@@ -243,12 +286,13 @@ class _Shelf extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SliverToBoxAdapter(
         child: SizedBox(
-          height: cardWidth + 72,
+          // Adjusted container height proportionally to match larger cards plus text labels
+          height: cardWidth + 95,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: tracks.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 14),
+            separatorBuilder: (_, __) => const SizedBox(width: 16),
             itemBuilder: (_, i) => MediaCard(
               track: tracks[i],
               width: cardWidth,

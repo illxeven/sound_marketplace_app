@@ -1,3 +1,4 @@
+import '../services/player_sync_service.dart';
 import 'dart:async';
 
 import 'package:audio_session/audio_session.dart';
@@ -25,9 +26,11 @@ class AudioPlayerProvider extends ChangeNotifier {
     AudioPlayer? player,
     EngagementService? engagementService,
     PlaybackService? playbackService,
+    PlayerSyncService? playerSyncService,
   })  : _player = player ?? AudioPlayer(),
         _engagement = engagementService ?? EngagementService(),
-        _playback = playbackService ?? PlaybackService() {
+        _playback = playbackService ?? PlaybackService(),
+        _sync = playerSyncService ?? PlayerSyncService() {
     _subscriptions.addAll([
       _player.playerStateStream.listen(_onPlayerState),
       _player.currentIndexStream.listen(_onIndexChanged),
@@ -40,6 +43,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   final AudioPlayer _player;
   final EngagementService _engagement;
   final PlaybackService _playback;
+  final PlayerSyncService _sync;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
 
   ConcatenatingAudioSource? _playlist;
@@ -236,6 +240,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   Future<void> cycleRepeat() async {
     const order = [LoopMode.off, LoopMode.all, LoopMode.one];
     await _player.setLoopMode(order[(order.indexOf(_player.loopMode) + 1) % order.length]);
+    _syncState();
     notifyListeners();
   }
 
@@ -249,6 +254,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     final enable = !_player.shuffleModeEnabled;
     if (enable) await _player.shuffle();
     await _player.setShuffleModeEnabled(enable);
+    _syncState();
     notifyListeners();
   }
 
@@ -279,6 +285,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     final at = (_player.currentIndex ?? -1) + 1;
     _queue.insert(at, track);
     await _playlist!.insert(at, _sourceFor(track));
+    unawaited(_sync.playNext(track.id, currentPosition: _player.currentIndex));
     notifyListeners();
   }
 
@@ -291,6 +298,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     if (!await _ensureUrl(track)) return;
     _queue.add(track);
     await _playlist!.add(_sourceFor(track));
+    unawaited(_sync.addToQueue(track.id));
     notifyListeners();
   }
 
@@ -302,6 +310,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     }
     _queue.removeAt(index);
     await _playlist!.removeAt(index);
+    unawaited(_sync.removeFromQueue(index));
     notifyListeners();
   }
 
@@ -311,6 +320,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     final track = _queue.removeAt(from);
     _queue.insert(target, track);
     await _playlist!.move(from, target);
+    unawaited(_sync.moveInQueue(from, target));
     notifyListeners();
   }
 
@@ -394,6 +404,19 @@ class AudioPlayerProvider extends ChangeNotifier {
     if (_player.hasNext) unawaited(_player.seekToNext());
   }
 
+  
+  void _syncState() {
+    unawaited(_sync.savePlayerState(
+      currentPosition: _player.currentIndex,
+      positionMs: _player.position.inMilliseconds,
+      shuffle: _player.shuffleModeEnabled,
+      repeatMode: switch (repeatMode) {
+        RepeatMode.one => 'ONE',
+        RepeatMode.all => 'ALL',
+        RepeatMode.off => 'OFF',
+      },
+    ));
+  }
   void clearError() {
     _errorMessage = null;
     notifyListeners();

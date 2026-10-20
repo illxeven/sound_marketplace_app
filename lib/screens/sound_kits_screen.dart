@@ -127,14 +127,14 @@ class _SoundKitsScreenState extends State<SoundKitsScreen> {
                       CircleAvatar(
                         radius: 12,
                         backgroundColor: AppTheme.primaryPurple,
-                        backgroundImage: (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
+                        backgroundImage: (user.avatarUrlComputed != null && user.avatarUrlComputed!.isNotEmpty)
                             ? NetworkImage(
-                                user.avatarUrl!.startsWith('http')
-                                    ? user.avatarUrl!
-                                    : ApiConfig.resolve(user.avatarUrl!),
+                                user.avatarUrlComputed!.startsWith('http')
+                                    ? user.avatarUrlComputed!
+                                    : ApiConfig.resolve(user.avatarUrlComputed!),
                               )
                             : null,
-                        child: (user.avatarUrl == null || user.avatarUrl!.isEmpty)
+                        child: (user.avatarUrlComputed == null || user.avatarUrlComputed!.isEmpty)
                             ? Text(
                                 user.displayName?.isNotEmpty == true
                                     ? user.displayName![0].toUpperCase()

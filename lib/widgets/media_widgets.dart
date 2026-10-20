@@ -9,6 +9,7 @@ import '../providers/audio_player_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/catalog_provider.dart';
 import '../providers/playlist_provider.dart';
+import 'comment_bottom_sheet.dart';
 
 /// Compact counts: 950, 1.2K, 3.4M.
 String formatCount(int n) => NumberFormat.compact().format(n);
@@ -246,7 +247,19 @@ class MediaCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
             const SizedBox(height: 3),
-            TrackStats(trackId: track.id, compact: true),
+            Row(
+              children: [
+                Expanded(child: TrackStats(trackId: track.id, compact: true)),
+                IconButton(
+                  tooltip: 'Comments',
+                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                  color: AppTheme.textSecondary,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: () => CommentBottomSheet.show(context, track),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -339,6 +352,11 @@ class TrackRow extends StatelessWidget {
               ),
             ),
             if (showPrice && !track.isFree) _PriceChip(price: track.price),
+            IconButton(
+              tooltip: 'Comments',
+              icon: const Icon(Icons.chat_bubble_outline_rounded, size: 20, color: AppTheme.textSecondary),
+              onPressed: () => CommentBottomSheet.show(context, track),
+            ),
             if (trailing != null) trailing! else LikeButton(trackId: track.id),
             IconButton(
               tooltip: 'More options',
@@ -397,6 +415,14 @@ Future<void> showTrackActions(BuildContext context, Track track) {
               onTap: () {
                 Navigator.pop(sheet);
                 showAddToPlaylistSheet(context, track);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.chat_bubble_outline_rounded),
+              title: const Text('Comments & replies'),
+              onTap: () {
+                Navigator.pop(sheet);
+                CommentBottomSheet.show(context, track);
               },
             ),
             Builder(builder: (ctx) {

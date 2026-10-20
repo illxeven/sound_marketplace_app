@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/api_config.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../models/merchandise.dart';
@@ -169,6 +170,16 @@ class MerchandiseCard extends StatelessWidget {
     if (item.imageBlob != null && item.imageBlob!.isNotEmpty) {
       return Image.memory(
         item.imageBlob!,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+      );
+    }
+    if (item.coverImageUrl != null && item.coverImageUrl!.isNotEmpty) {
+      final url = item.coverImageUrl!.startsWith('http')
+          ? item.coverImageUrl!
+          : ApiConfig.resolve(item.coverImageUrl!);
+      return Image.network(
+        url,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
       );

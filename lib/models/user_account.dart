@@ -50,7 +50,7 @@ class UserAccount {
     });
   }
 
-  bool get canUploadMerchandise => isArtist;
+  bool get canUploadMerchandise => isArtistOrProducer;
 
   bool get canUploadTracks => isArtistOrProducer;
 

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../providers/audio_player_provider.dart';
 import '../widgets/media_widgets.dart';
+import '../widgets/comment_bottom_sheet.dart';
 
 /// Full-screen player: artwork, seek bar with buffering, transport controls, shuffle/repeat,
 /// live play count, and the editable "Up next" queue.
@@ -39,9 +40,19 @@ class NowPlayingScreen extends StatelessWidget {
         centerTitle: true,
         actions: [
           IconButton(
+            tooltip: 'Comments',
+            icon: const Icon(Icons.chat_bubble_outline_rounded),
+            onPressed: () => CommentBottomSheet.show(context, track),
+          ),
+          IconButton(
             tooltip: 'Add to playlist',
             icon: const Icon(Icons.playlist_add_rounded),
             onPressed: () => showAddToPlaylistSheet(context, track),
+          ),
+          IconButton(
+            tooltip: 'More options',
+            icon: const Icon(Icons.more_vert_rounded),
+            onPressed: () => showTrackActions(context, track),
           ),
         ],
       ),
@@ -91,6 +102,11 @@ class NowPlayingScreen extends StatelessWidget {
                             ],
                           ),
                         ),
+                        IconButton(
+                          tooltip: 'Comments',
+                          icon: const Icon(Icons.chat_bubble_outline_rounded, color: AppTheme.textSecondary, size: 26),
+                          onPressed: () => CommentBottomSheet.show(context, track),
+                        ),
                         LikeButton(trackId: track.id, size: 28),
                       ],
                     ),
@@ -104,7 +120,33 @@ class NowPlayingScreen extends StatelessWidget {
                         child: Text(player.errorMessage!,
                             textAlign: TextAlign.center, style: const TextStyle(color: Colors.redAccent, fontSize: 12.5)),
                       ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 14),
+                    InkWell(
+                      onTap: () => CommentBottomSheet.show(context, track),
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceColor,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.white10),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.chat_bubble_outline_rounded, size: 18, color: AppTheme.secondaryCyan),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'View & leave comments on this track...',
+                                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                              ),
+                            ),
+                            Icon(Icons.chevron_right_rounded, size: 20, color: AppTheme.textSecondary),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
                     Row(
                       children: [
                         const Text('Up next', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),

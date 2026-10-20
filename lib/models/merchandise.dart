@@ -113,6 +113,7 @@ class Merchandise {
   final double price;
   final String? description;
   final String? filePath;
+  final String? coverImageUrl;
   final Uint8List? imageBlob;
   final Uint8List? imageBlob2;
   final Uint8List? imageBlob3;
@@ -139,6 +140,7 @@ class Merchandise {
     this.price = 0.0,
     this.description,
     this.filePath,
+    this.coverImageUrl,
     this.imageBlob,
     this.imageBlob2,
     this.imageBlob3,
@@ -184,6 +186,7 @@ class Merchandise {
     double? price,
     String? description,
     String? filePath,
+    String? coverImageUrl,
     Uint8List? imageBlob,
     Uint8List? imageBlob2,
     Uint8List? imageBlob3,
@@ -210,6 +213,7 @@ class Merchandise {
       price: price ?? this.price,
       description: description ?? this.description,
       filePath: filePath ?? this.filePath,
+      coverImageUrl: coverImageUrl ?? this.coverImageUrl,
       imageBlob: imageBlob ?? this.imageBlob,
       imageBlob2: imageBlob2 ?? this.imageBlob2,
       imageBlob3: imageBlob3 ?? this.imageBlob3,
@@ -252,17 +256,20 @@ class Merchandise {
     return Merchandise(
       id: (json['id'] as num).toInt(),
       merchandiseTypeId: (json['merchandiseTypeId'] as num?)?.toInt(),
-      merchandiseTypeName: json['merchandiseTypeName'] as String?,
+      merchandiseTypeName: json['merchandiseTypeName'] as String? ?? json['typeName'] as String?,
       categoryId: (json['categoryId'] as num?)?.toInt(),
       categoryName: json['categoryName'] as String?,
       groupTypeId: (json['groupTypeId'] as num?)?.toInt(),
       groupTypeName: json['groupTypeName'] as String?,
       sellerId: (json['sellerId'] as num?)?.toInt(),
-      sellerEmail: json['sellerEmail'] as String?,
+      sellerEmail: json['sellerEmail'] as String? ?? json['sellerName'] as String?,
       title: json['title'] as String? ?? 'Sound Pack',
       price: (json['price'] != null) ? (json['price'] as num).toDouble() : 0.0,
       description: json['description'] as String?,
       filePath: json['filePath'] as String?,
+      coverImageUrl: json['coverImageUrl'] as String? ??
+          json['coverUrl'] as String? ??
+          (json['id'] != null ? '/merchandise/${json['id']}/images/1' : null),
       imageBlob: _parseBlob(json['image_blob'] ?? json['imageBlob']),
       imageBlob2: _parseBlob(json['image_blob_2'] ?? json['imageBlob2']),
       imageBlob3: _parseBlob(json['image_blob_3'] ?? json['imageBlob3']),
