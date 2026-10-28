@@ -202,6 +202,7 @@ class CartScreen extends StatelessWidget {
                                          amount: cartProv.subtotal,
                                          itemTitle: 'Sound Marketplace Cart (${cartProv.totalItems} items)',
                                          itemType: 'cart',
+                                         hasMerchandise: cartProv.items.any((i) => i.isMerchandise),
                                          user: user,
                                          metadata: {
                                            'cartItemsCount': cartProv.totalItems.toString(),

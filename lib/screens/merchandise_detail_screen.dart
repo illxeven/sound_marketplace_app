@@ -565,6 +565,29 @@ class _MerchandiseDetailScreenState extends State<MerchandiseDetailScreen> {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (_item.isPending)
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.orange.withValues(alpha: 0.6)),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(Icons.hourglass_top_rounded, color: Colors.orange, size: 20),
+                                SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'Pending review — this listing is only visible to you until approved by an admin.',
+                                    style: TextStyle(color: Colors.orangeAccent, fontSize: 13, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         AspectRatio(
                           aspectRatio: 16 / 10,
                           child: Container(

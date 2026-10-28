@@ -166,10 +166,20 @@ class AudioPlayerProvider extends ChangeNotifier {
       unawaited(_player.play());
       debugPrint('[player] queue set size=${playable.length} start=$start trackId=${playable[start].id}');
     } on ApiException catch (e) {
-      _errorMessage = e.message;
+      if (e.code == 'PREVIEW_UNAVAILABLE' || (e.statusCode == 404 && e.message.contains('PREVIEW_UNAVAILABLE'))) {
+        _errorMessage = 'Preview not available — buy to listen';
+      } else {
+        _errorMessage = e.message;
+      }
       notifyListeners();
     } on PlayerException catch (e) {
-      _errorMessage = "This track couldn't be played (${e.message ?? 'player error'}).";
+      final isPreviewUnavail = (e.message ?? '').contains('PREVIEW_UNAVAILABLE') ||
+          (currentTrack != null && isPreview(currentTrack!.id) && ((e.message ?? '').contains('404') || '${e.code}'.contains('404')));
+      if (isPreviewUnavail) {
+        _errorMessage = 'Preview not available — buy to listen';
+      } else {
+        _errorMessage = "This track couldn't be played (${e.message ?? 'player error'}).";
+      }
       debugPrint('[player] setAudioSource failed code=${e.code} message=${e.message}');
       notifyListeners();
     }
@@ -269,7 +279,11 @@ class AudioPlayerProvider extends ChangeNotifier {
       _urls.addAll(await _playback.getPlayUrls([t.id]));
       return _urls.containsKey(t.id);
     } on ApiException catch (e) {
-      _errorMessage = e.message;
+      if (e.code == 'PREVIEW_UNAVAILABLE' || (e.statusCode == 404 && e.message.contains('PREVIEW_UNAVAILABLE'))) {
+        _errorMessage = 'Preview not available — buy to listen';
+      } else {
+        _errorMessage = e.message;
+      }
       notifyListeners();
       return false;
     }
@@ -398,6 +412,17 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   void _onPlaybackError(Object error, StackTrace stack) {
     final track = currentTrack;
+    final errStr = error.toString();
+    final isPreviewUnavail = errStr.contains('PREVIEW_UNAVAILABLE') ||
+        (track != null && isPreview(track.id) && (errStr.contains('404') || errStr.contains('Response code: 404')));
+
+    if (isPreviewUnavail) {
+      _errorMessage = 'Preview not available — buy to listen';
+      debugPrint('[player] preview unavailable trackId=${track?.id}: $error');
+      notifyListeners();
+      return; // Do not cycle/retry
+    }
+
     _errorMessage = "Couldn't play ${track?.title ?? 'this track'}. Skipping to the next one.";
     debugPrint('[player] playback error trackId=${track?.id}: $error');
     notifyListeners();

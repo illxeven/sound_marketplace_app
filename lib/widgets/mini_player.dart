@@ -37,6 +37,30 @@ class MiniPlayer extends StatelessWidget {
                 );
               },
             ),
+            if (player.errorMessage != null)
+              Container(
+                color: Colors.amber.shade900.withValues(alpha: 0.35),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded, size: 13, color: Colors.amberAccent),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        player.errorMessage!,
+                        key: const Key('mini_player_error_text'),
+                        style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w500),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    InkWell(
+                      onTap: player.clearError,
+                      child: const Icon(Icons.close, size: 13, color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
               child: Row(

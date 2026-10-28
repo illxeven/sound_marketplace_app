@@ -306,6 +306,38 @@ class MerchandiseCard extends StatelessWidget {
                       ),
                     ),
 
+                    // Pending Review Badge (bottom left)
+                    if (item.isPending)
+                      Positioned(
+                        bottom: 10,
+                        left: 10,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade900,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: const [
+                              BoxShadow(color: Colors.black54, blurRadius: 4),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.hourglass_empty_rounded, size: 11, color: Colors.white),
+                              SizedBox(width: 4),
+                              Text(
+                                'Pending review',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
                     // Quick Detail Tap overlay hint (bottom gradient)
                     Positioned(
                       bottom: 0,

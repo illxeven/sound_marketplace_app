@@ -19,6 +19,10 @@ import 'create_merchandise_screen.dart';
 import 'artist_storefront_screen.dart';
 import 'cart_screen.dart';
 import 'home_screen.dart';
+import 'admin_moderation_screen.dart';
+import 'library_screen.dart';
+import 'seller_sales_screen.dart';
+import 'order_history_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   final int? artistId;
@@ -419,6 +423,60 @@ class ProfileScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
+          // Admin Moderation Portal (visible only to ADMIN and SUPER_ADMIN)
+          if (user.isAdmin) ...[
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: AppTheme.cardColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.admin_panel_settings_rounded, color: Colors.amber, size: 22),
+                      SizedBox(width: 10),
+                      Text(
+                        'Admin Portal',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.amber),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Review and approve or reject seller merchandise submissions before they appear in public search.',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      key: const Key('admin_moderation_queue_button'),
+                      icon: const Icon(Icons.rule_folder_rounded, size: 18),
+                      label: const Text('Open Moderation Queue'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.amber.shade800,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (ctx) => const AdminModerationScreen()),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+
           // Upload Track or Consumer Notice (Strict Upload Location RBAC)
           if (user.canUploadTracks) ...[
             Container(
@@ -530,6 +588,27 @@ class ProfileScreen extends StatelessWidget {
                         },
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        key: const Key('seller_sales_button'),
+                        icon: const Icon(Icons.point_of_sale_rounded, size: 18),
+                        label: const Text('My Sales & Shipping Fulfillment'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.secondaryCyan,
+                          side: const BorderSide(color: AppTheme.secondaryCyan),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (ctx) => const SellerSalesScreen()),
+                          );
+                        },
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -575,10 +654,80 @@ class ProfileScreen extends StatelessWidget {
           ],
           const SizedBox(height: 24),
 
+          // Purchased Library Card (Requirement B1)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.cardColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.secondaryCyan.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryPurple.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.library_music_rounded, color: AppTheme.secondaryCyan, size: 26),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'My Purchased Library',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      Text(
+                        'Download full audio masters for all purchased tracks & beats.',
+                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                ElevatedButton(
+                  key: const Key('my_library_button'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryPurple,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (ctx) => const LibraryScreen()),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
           // Purchases & Payment History
-          Text(
-            'Purchase History (Stripe)',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Purchase & Order History',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              TextButton.icon(
+                key: const Key('view_all_orders_button'),
+                icon: const Icon(Icons.receipt_long_rounded, size: 16, color: AppTheme.secondaryCyan),
+                label: const Text('All Orders', style: TextStyle(color: AppTheme.secondaryCyan, fontSize: 13)),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (ctx) => const OrderHistoryScreen()),
+                  );
+                },
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           if (mkt.paymentHistory.isEmpty)

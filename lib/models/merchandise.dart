@@ -124,6 +124,7 @@ class Merchandise {
   final int quantity;
   final double? averageRating;
   final int reviewCount;
+  final String? moderationStatus;
   final DateTime? createdAt;
 
   Merchandise({
@@ -151,6 +152,7 @@ class Merchandise {
     int? quantity,
     this.averageRating,
     this.reviewCount = 0,
+    this.moderationStatus,
     this.createdAt,
   }) : quantity = quantity ?? stockQuantity;
 
@@ -171,6 +173,9 @@ class Merchandise {
       categoryName ?? merchandiseTypeName ?? 'Merchandise';
 
   bool get isOutOfStock => stockQuantity <= 0;
+  bool get isPending => (moderationStatus ?? '').toUpperCase() == 'PENDING';
+  bool get isApproved => (moderationStatus ?? '').toUpperCase() == 'APPROVED';
+  bool get isRejected => (moderationStatus ?? '').toUpperCase() == 'REJECTED';
 
   Merchandise copyWith({
     int? id,
@@ -197,6 +202,7 @@ class Merchandise {
     int? quantity,
     double? averageRating,
     int? reviewCount,
+    String? moderationStatus,
     DateTime? createdAt,
   }) {
     return Merchandise(
@@ -224,6 +230,7 @@ class Merchandise {
       quantity: quantity ?? this.quantity,
       averageRating: averageRating ?? this.averageRating,
       reviewCount: reviewCount ?? this.reviewCount,
+      moderationStatus: moderationStatus ?? this.moderationStatus,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -280,6 +287,7 @@ class Merchandise {
       quantity: stock,
       averageRating: (json['averageRating'] != null) ? (json['averageRating'] as num).toDouble() : null,
       reviewCount: (json['reviewCount'] as num?)?.toInt() ?? 0,
+      moderationStatus: json['moderationStatus'] as String? ?? json['moderation_status'] as String?,
       createdAt: json['createdAt'] != null ? DateTime.tryParse(json['createdAt'].toString()) : null,
     );
   }
@@ -309,6 +317,7 @@ class Merchandise {
       'quantity': quantity,
       'averageRating': averageRating,
       'reviewCount': reviewCount,
+      'moderationStatus': moderationStatus,
       'createdAt': createdAt?.toIso8601String(),
     };
   }

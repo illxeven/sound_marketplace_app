@@ -2,8 +2,11 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
+import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../models/user_account.dart';
+import '../providers/cart_provider.dart';
+import '../services/api_client.dart';
 import '../services/stripe_payment_service.dart';
 
 class CheckoutScreen extends StatefulWidget {
@@ -13,6 +16,7 @@ class CheckoutScreen extends StatefulWidget {
   final int? itemId;
   final UserAccount user;
   final Map<String, String>? metadata;
+  final bool? hasMerchandise;
 
   const CheckoutScreen({
     super.key,
@@ -22,6 +26,7 @@ class CheckoutScreen extends StatefulWidget {
     this.itemId,
     required this.user,
     this.metadata,
+    this.hasMerchandise,
   });
 
   static Future<String?> startCheckout({
@@ -32,6 +37,7 @@ class CheckoutScreen extends StatefulWidget {
     int? itemId,
     required UserAccount user,
     Map<String, String>? metadata,
+    bool? hasMerchandise,
   }) {
     return Navigator.push<String>(
       context,
@@ -43,6 +49,7 @@ class CheckoutScreen extends StatefulWidget {
           itemId: itemId,
           user: user,
           metadata: metadata,
+          hasMerchandise: hasMerchandise,
         ),
       ),
     );
@@ -54,6 +61,7 @@ class CheckoutScreen extends StatefulWidget {
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _shippingFormKey = GlobalKey<FormState>();
 
   final _cardNumberController = TextEditingController();
   final _expController = TextEditingController();
@@ -61,16 +69,56 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final _zipController = TextEditingController();
   final _nameController = TextEditingController();
 
+  // Shipping Address controllers for merchandise orders
+  final _shipFullNameController = TextEditingController();
+  final _shipLine1Controller = TextEditingController();
+  final _shipLine2Controller = TextEditingController();
+  final _shipCityController = TextEditingController();
+  final _shipRegionController = TextEditingController();
+  final _shipPostalCodeController = TextEditingController();
+  final _shipCountryCodeController = TextEditingController();
+  final _shipPhoneController = TextEditingController();
+
   bool _saveCardForFuture = true;
   bool _isProcessing = false;
+  String? _serverErrorMessage;
   List<SavedCard> _savedCards = [];
   SavedCard? _selectedSavedCard;
   bool _isLoadingCards = true;
+
+  bool get _requiresShipping {
+    if (widget.hasMerchandise != null) return widget.hasMerchandise!;
+    if (widget.itemType.toLowerCase() == 'merchandise') return true;
+    if (widget.itemType.toLowerCase() == 'cart') {
+      try {
+        final cartProv = Provider.of<CartProvider>(context, listen: false);
+        if (cartProv.items.any((i) => i.isMerchandise)) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  Map<String, dynamic>? _buildShippingAddress() {
+    if (!_requiresShipping) return null;
+    return {
+      'fullName': _shipFullNameController.text.trim(),
+      'line1': _shipLine1Controller.text.trim(),
+      if (_shipLine2Controller.text.trim().isNotEmpty) 'line2': _shipLine2Controller.text.trim(),
+      'city': _shipCityController.text.trim(),
+      if (_shipRegionController.text.trim().isNotEmpty) 'region': _shipRegionController.text.trim(),
+      'postalCode': _shipPostalCodeController.text.trim(),
+      'countryCode': _shipCountryCodeController.text.trim().toUpperCase(),
+      if (_shipPhoneController.text.trim().isNotEmpty) 'phone': _shipPhoneController.text.trim(),
+    };
+  }
 
   @override
   void initState() {
     super.initState();
     _nameController.text = widget.user.effectiveName;
+    _shipFullNameController.text = widget.user.effectiveName;
+    final country = widget.user.country?.trim() ?? '';
+    _shipCountryCodeController.text = country.length == 2 ? country.toUpperCase() : 'US';
     _loadSavedCards();
   }
 
@@ -81,6 +129,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     _cvcController.dispose();
     _zipController.dispose();
     _nameController.dispose();
+    _shipFullNameController.dispose();
+    _shipLine1Controller.dispose();
+    _shipLine2Controller.dispose();
+    _shipCityController.dispose();
+    _shipRegionController.dispose();
+    _shipPostalCodeController.dispose();
+    _shipCountryCodeController.dispose();
+    _shipPhoneController.dispose();
     super.dispose();
   }
 
@@ -122,31 +178,45 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   /// Native Mobile Payment Sheet Flow (iOS & Android)
   Future<void> _payWithNativeStripePaymentSheet() async {
-    setState(() => _isProcessing = true);
+    if (_requiresShipping && !(_shippingFormKey.currentState?.validate() ?? false)) {
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+      _serverErrorMessage = null;
+    });
 
     try {
       debugPrint('[Checkout] Starting Native Stripe Payment Sheet flow...');
-      final intentResult = await StripePaymentService.createPaymentIntent(
-        amount: widget.amount,
-        itemDetails: '${widget.itemType}: ${widget.itemTitle}',
-        itemType: widget.itemType,
-        itemId: widget.itemId,
-        buyerId: widget.user.id,
-        saveCard: _saveCardForFuture,
-        confirm: false,
-        metadata: widget.metadata,
+      final isCart = widget.itemType.toLowerCase() == 'cart';
+      final checkoutResult = await StripePaymentService.createCheckout(
+        fromCart: isCart,
+        items: !isCart && widget.itemId != null
+            ? [
+                {
+                  'type': widget.itemType.toUpperCase(),
+                  'id': widget.itemId,
+                  'quantity': 1,
+                }
+              ]
+            : null,
+        shippingAddress: _buildShippingAddress(),
       );
 
-      debugPrint('[Checkout] Presenting Stripe Payment Sheet for Intent: ${intentResult.paymentIntentId}');
+      debugPrint('[Checkout] Presenting Stripe Payment Sheet for Order: ${checkoutResult.orderId}');
       await StripePaymentService.presentNativePaymentSheet(
-        clientSecret: intentResult.clientSecret,
-        customerId: intentResult.customerId,
-        customerEphemeralKeySecret: intentResult.customerEphemeralKeySecret,
+        clientSecret: checkoutResult.clientSecret,
+        customerId: checkoutResult.customerId,
+        customerEphemeralKeySecret: checkoutResult.ephemeralKey,
       );
+
+      debugPrint('[Checkout] Polling order ${checkoutResult.orderId}...');
+      await StripePaymentService.pollOrderStatus(checkoutResult.orderId);
 
       if (mounted) {
         setState(() => _isProcessing = false);
-        Navigator.pop(context, intentResult.paymentIntentId);
+        Navigator.pop(context, checkoutResult.orderId.toString());
       }
     } on StripeException catch (e) {
       if (mounted) {
@@ -159,17 +229,35 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             ),
           );
         } else {
+          final msg = e.error.localizedMessage ?? e.error.code.name;
+          setState(() => _serverErrorMessage = 'Stripe Error: $msg');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Stripe Error: ${e.error.localizedMessage ?? e.error.code.name}'),
+              content: Text('Stripe Error: $msg'),
               backgroundColor: AppTheme.errorRed,
             ),
           );
         }
       }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _serverErrorMessage = e.message;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: AppTheme.errorRed,
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
-        setState(() => _isProcessing = false);
+        setState(() {
+          _isProcessing = false;
+          _serverErrorMessage = e.toString().replaceFirst('Exception: ', '');
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Payment Sheet error: $e'),
@@ -180,45 +268,62 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  /// In-app card processing / Web test checkout with immediate Stripe Sandbox confirmation
+  /// In-app card processing / Web test checkout with immediate checkout & order polling
   Future<void> _processPayment() async {
-    if (_selectedSavedCard == null && !_formKey.currentState!.validate()) {
+    if (_requiresShipping && !(_shippingFormKey.currentState?.validate() ?? false)) {
+      return;
+    }
+    if (_selectedSavedCard == null && !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
 
-    setState(() => _isProcessing = true);
+    setState(() {
+      _isProcessing = true;
+      _serverErrorMessage = null;
+    });
 
     try {
-      debugPrint('[Checkout] Creating and confirming Stripe PaymentIntent...');
-      final intentResult = await StripePaymentService.createPaymentIntent(
-        amount: widget.amount,
-        itemDetails: '${widget.itemType}: ${widget.itemTitle}',
-        itemType: widget.itemType,
-        itemId: widget.itemId,
-        buyerId: widget.user.id,
-        saveCard: _saveCardForFuture,
-        confirm: true, // Immediately confirms with Stripe so transaction appears in Sandbox dashboard!
-        paymentMethodId: 'pm_card_visa',
-        metadata: {
-          ...?widget.metadata,
-          'savedCardUsed': _selectedSavedCard != null ? 'true' : 'false',
-          'last4': _selectedSavedCard != null
-              ? _selectedSavedCard!.last4
-              : (_cardNumberController.text.length >= 4
-                  ? _cardNumberController.text.substring(_cardNumberController.text.length - 4)
-                  : '4242'),
-        },
+      debugPrint('[Checkout] Starting checkout via POST /api/checkout...');
+      final isCart = widget.itemType.toLowerCase() == 'cart';
+      final checkoutResult = await StripePaymentService.createCheckout(
+        fromCart: isCart,
+        items: !isCart && widget.itemId != null
+            ? [
+                {
+                  'type': widget.itemType.toUpperCase(),
+                  'id': widget.itemId,
+                  'quantity': 1,
+                }
+              ]
+            : null,
+        shippingAddress: _buildShippingAddress(),
       );
 
-      debugPrint('[Checkout] PaymentIntent confirmed: ${intentResult.paymentIntentId} (Status: ${intentResult.status})');
+      debugPrint('[Checkout] Order created: ${checkoutResult.orderId}');
 
       if (mounted) {
         setState(() => _isProcessing = false);
-        Navigator.pop(context, intentResult.paymentIntentId);
+        Navigator.pop(context, checkoutResult.orderId.toString());
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _serverErrorMessage = e.message;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: AppTheme.errorRed,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isProcessing = false);
+        setState(() {
+          _isProcessing = false;
+          _serverErrorMessage = e.toString().replaceFirst('Exception: ', '');
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Payment processing failed: $e'),
@@ -297,12 +402,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('Total Amount:', style: TextStyle(color: AppTheme.textSecondary)),
-                        Text(
-                          '\$${widget.amount.toStringAsFixed(2)} USD',
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.secondaryCyan,
+                        Flexible(
+                          child: Text(
+                            '\$${widget.amount.toStringAsFixed(2)} USD',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.secondaryCyan,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -311,6 +419,185 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ),
               ),
               const SizedBox(height: 20),
+
+              // Shipping Address Form (required for merchandise items)
+              if (_requiresShipping) ...[
+                Container(
+                  key: const Key('shipping_address_section'),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.cardColor,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.primaryPurple.withValues(alpha: 0.3)),
+                  ),
+                  child: Form(
+                    key: _shippingFormKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.local_shipping_outlined, color: AppTheme.secondaryCyan, size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'Shipping Address',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Required for physical merchandise delivery.',
+                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                        ),
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          key: const Key('shipping_full_name'),
+                          controller: _shipFullNameController,
+                          decoration: const InputDecoration(
+                            labelText: 'Full Name *',
+                            hintText: 'John Doe',
+                            prefixIcon: Icon(Icons.person_outline),
+                          ),
+                          validator: (v) => (v == null || v.trim().isEmpty) ? 'Full name is required' : null,
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          key: const Key('shipping_line1'),
+                          controller: _shipLine1Controller,
+                          decoration: const InputDecoration(
+                            labelText: 'Street Address Line 1 *',
+                            hintText: '123 Main St',
+                            prefixIcon: Icon(Icons.home_outlined),
+                          ),
+                          validator: (v) => (v == null || v.trim().isEmpty) ? 'Street address is required' : null,
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          key: const Key('shipping_line2'),
+                          controller: _shipLine2Controller,
+                          decoration: const InputDecoration(
+                            labelText: 'Apartment, Suite, Unit (optional)',
+                            hintText: 'Apt 4B',
+                            prefixIcon: Icon(Icons.location_city_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextFormField(
+                                key: const Key('shipping_city'),
+                                controller: _shipCityController,
+                                decoration: const InputDecoration(
+                                  labelText: 'City *',
+                                  hintText: 'New York',
+                                ),
+                                validator: (v) => (v == null || v.trim().isEmpty) ? 'City is required' : null,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              flex: 2,
+                              child: TextFormField(
+                                key: const Key('shipping_region'),
+                                controller: _shipRegionController,
+                                decoration: const InputDecoration(
+                                  labelText: 'State / Region',
+                                  hintText: 'NY',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextFormField(
+                                key: const Key('shipping_postal_code'),
+                                controller: _shipPostalCodeController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Postal / ZIP Code *',
+                                  hintText: '10001',
+                                ),
+                                validator: (v) => (v == null || v.trim().isEmpty) ? 'Postal code is required' : null,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              flex: 2,
+                              child: TextFormField(
+                                key: const Key('shipping_country_code'),
+                                controller: _shipCountryCodeController,
+                                textCapitalization: TextCapitalization.characters,
+                                inputFormatters: [
+                                  LengthLimitingTextInputFormatter(2),
+                                ],
+                                decoration: const InputDecoration(
+                                  labelText: 'Country Code *',
+                                  hintText: 'US',
+                                ),
+                                validator: (v) {
+                                  if (v == null || v.trim().isEmpty) return 'Required';
+                                  if (v.trim().length != 2) return '2 letters (e.g. US)';
+                                  return null;
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          key: const Key('shipping_phone'),
+                          controller: _shipPhoneController,
+                          keyboardType: TextInputType.phone,
+                          decoration: const InputDecoration(
+                            labelText: 'Phone Number (optional)',
+                            hintText: '+1 555-0199',
+                            prefixIcon: Icon(Icons.phone_outlined),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+
+              // Server Error Message (shown in red under the form)
+              if (_serverErrorMessage != null) ...[
+                Container(
+                  key: const Key('checkout_server_error_banner'),
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.errorRed.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.errorRed.withValues(alpha: 0.5)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline_rounded, color: AppTheme.errorRed, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _serverErrorMessage!,
+                          key: const Key('checkout_server_error_text'),
+                          style: const TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
 
               // Native Stripe Payment Sheet button for mobile (iOS & Android)
               if (!kIsWeb) ...[
@@ -443,9 +730,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Debit / Credit Card',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  const Expanded(
+                    child: Text(
+                      'Debit / Credit Card',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   TextButton.icon(
                     onPressed: _fillStripeTestCard,
@@ -605,6 +895,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
+                  key: const Key('checkout_pay_button'),
                   onPressed: _isProcessing ? null : _processPayment,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),

@@ -42,6 +42,14 @@ class UserAccount {
     });
   }
 
+  bool get isAdmin {
+    if (roles.isEmpty) return false;
+    return roles.any((r) {
+      final clean = r.toUpperCase().replaceAll('ROLE_', '');
+      return clean == 'ADMIN' || clean == 'SUPER_ADMIN';
+    });
+  }
+
   bool get isArtist {
     if (roles.isEmpty) return false;
     return roles.any((r) {

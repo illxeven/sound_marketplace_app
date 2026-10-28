@@ -1,10 +1,9 @@
-import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
-import 'package:http/http.dart' as http;
-import '../config/api_config.dart';
 import '../config/theme.dart';
+import 'api_client.dart';
 
 class SavedCard {
   final String id;
@@ -27,7 +26,7 @@ class SavedCard {
     return SavedCard(
       id: json['id'] ?? '',
       brand: json['brand'] ?? 'card',
-      last4: json['last4'] ?? '••••',
+      last4: json['last4'] ?? '????',
       expMonth: (json['expMonth'] as num?)?.toInt() ?? 12,
       expYear: (json['expYear'] as num?)?.toInt() ?? 2028,
       isDefault: json['isDefault'] == true,
@@ -35,109 +34,61 @@ class SavedCard {
   }
 }
 
-class PaymentIntentResult {
+class CheckoutResult {
+  final int orderId;
   final String clientSecret;
-  final String paymentIntentId;
-  final double amount;
-  final String currency;
-  final String status;
   final String? customerId;
-  final String? customerEphemeralKeySecret;
+  final String? ephemeralKey;
+  final String? url;
 
-  PaymentIntentResult({
+  CheckoutResult({
+    required this.orderId,
     required this.clientSecret,
-    required this.paymentIntentId,
-    required this.amount,
-    required this.currency,
-    required this.status,
     this.customerId,
-    this.customerEphemeralKeySecret,
+    this.ephemeralKey,
+    this.url,
   });
 
-  factory PaymentIntentResult.fromJson(Map<String, dynamic> json) {
-    return PaymentIntentResult(
+  factory CheckoutResult.fromJson(Map<String, dynamic> json) {
+    return CheckoutResult(
+      orderId: (json['orderId'] as num?)?.toInt() ?? 0,
       clientSecret: json['clientSecret'] ?? '',
-      paymentIntentId: json['paymentIntentId'] ?? '',
-      amount: (json['amount'] as num?)?.toDouble() ?? 0.0,
-      currency: json['currency'] ?? 'USD',
-      status: json['status'] ?? '',
-      customerId: json['customerId'],
-      customerEphemeralKeySecret: json['customerEphemeralKeySecret'],
+      customerId: json['customerId'] as String?,
+      ephemeralKey: json['ephemeralKey'] as String?,
+      url: json['url'] as String?,
     );
   }
 }
 
 class StripePaymentService {
-  /// Calls the Spring Boot backend endpoint POST /api/payments/create-intent
-  static Future<PaymentIntentResult> createPaymentIntent({
-    required double amount,
-    required String itemDetails,
-    required String itemType, // 'merchandise', 'sound_kit', 'track', 'cart'
-    int? itemId,
-    required int buyerId,
-    String currency = 'usd',
-    bool saveCard = true,
-    bool confirm = false,
-    String? paymentMethodId,
-    Map<String, String>? metadata,
+  /// Calls the Spring Boot backend endpoint POST /api/checkout using ApiClient
+  static Future<CheckoutResult> createCheckout({
+    bool fromCart = false,
+    List<Map<String, dynamic>>? items,
+    Map<String, dynamic>? shippingAddress,
+    String? successUrl,
+    String? cancelUrl,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/payments/create-intent');
-    debugPrint('[Stripe] Calling $uri for amount \$$amount USD (confirm=$confirm)');
+    final body = <String, dynamic>{
+      if (fromCart) 'fromCart': true,
+      if (items != null && items.isNotEmpty) 'items': items,
+      if (shippingAddress != null) 'shippingAddress': shippingAddress,
+      if (successUrl != null) 'successUrl': successUrl,
+      if (cancelUrl != null) 'cancelUrl': cancelUrl,
+    };
 
-    final response = await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'amount': amount,
-        'currency': currency,
-        'itemDetails': itemDetails,
-        'itemType': itemType,
-        'itemId': itemId,
-        'buyerId': buyerId,
-        'saveCard': saveCard,
-        'confirm': confirm,
-        'paymentMethodId': paymentMethodId,
-        'metadata': metadata ?? {},
-      }),
+    debugPrint('[Stripe] Calling POST /api/checkout with body: $body');
+    final response = await ApiClient.post<Map<String, dynamic>>(
+      '/checkout',
+      body: body,
+      fromJsonT: (json) => json is Map<String, dynamic> ? json : <String, dynamic>{},
     );
 
-    if (response.statusCode != 200 && response.statusCode != 201) {
-      debugPrint('[Stripe Error] Backend create-intent failed (${response.statusCode}): ${response.body}');
-      throw Exception('Failed to create payment intent: ${response.body}');
+    if (response.data == null) {
+      throw ApiException('Failed to start checkout: invalid response from server');
     }
 
-    final decoded = jsonDecode(response.body);
-    final data = decoded['data'] ?? decoded;
-    debugPrint('[Stripe] Received PaymentIntent: ${data['paymentIntentId']} (status: ${data['status']})');
-    return PaymentIntentResult.fromJson(data);
-  }
-
-  /// Calls the Spring Boot backend endpoint POST /api/payments/confirm-intent
-  static Future<PaymentIntentResult> confirmPaymentIntent({
-    required String paymentIntentId,
-    String paymentMethodId = 'pm_card_visa',
-  }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/payments/confirm-intent');
-    debugPrint('[Stripe] Calling $uri to confirm $paymentIntentId with $paymentMethodId');
-
-    final response = await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'paymentIntentId': paymentIntentId,
-        'paymentMethodId': paymentMethodId,
-      }),
-    );
-
-    if (response.statusCode != 200 && response.statusCode != 201) {
-      debugPrint('[Stripe Error] Backend confirm-intent failed (${response.statusCode}): ${response.body}');
-      throw Exception('Failed to confirm payment intent: ${response.body}');
-    }
-
-    final decoded = jsonDecode(response.body);
-    final data = decoded['data'] ?? decoded;
-    debugPrint('[Stripe] PaymentIntent confirmed! Status: ${data['status']}');
-    return PaymentIntentResult.fromJson(data);
+    return CheckoutResult.fromJson(response.data!);
   }
 
   /// Explicitly initializes and presents the official Stripe Native Payment Sheet.
@@ -148,7 +99,7 @@ class StripePaymentService {
     String? customerEphemeralKeySecret,
   }) async {
     if (kIsWeb) {
-      throw UnsupportedError('Stripe Native Payment Sheet is not supported on Web. Use in-app confirmation.');
+      throw UnsupportedError('Stripe Native Payment Sheet is not supported on Web.');
     }
 
     debugPrint('[Stripe] Initializing Payment Sheet with clientSecret: ${clientSecret.substring(0, clientSecret.length > 15 ? 15 : clientSecret.length)}...');
@@ -174,16 +125,53 @@ class StripePaymentService {
     debugPrint('[Stripe] presentPaymentSheet completed successfully!');
   }
 
+  /// Polls GET /api/orders/{orderId} every [interval] up to [timeout] until status is PAID.
+  static Future<Map<String, dynamic>> pollOrderStatus(
+    int orderId, {
+    Duration timeout = const Duration(seconds: 30),
+    Duration interval = const Duration(seconds: 2),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    debugPrint('[Stripe] Polling order $orderId until PAID...');
+
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final res = await ApiClient.get<Map<String, dynamic>>(
+          '/orders/$orderId',
+          fromJsonT: (json) => json is Map<String, dynamic> ? json : <String, dynamic>{},
+        );
+        final order = res.data;
+        if (order != null) {
+          final status = (order['status'] as String?)?.toUpperCase();
+          debugPrint('[Stripe] Polled order $orderId status: $status');
+          if (status == 'PAID' || status == 'COMPLETED') {
+            return order;
+          }
+          if (status == 'FAILED' || status == 'CANCELLED') {
+            throw ApiException('Order $orderId failed with status: $status');
+          }
+        }
+      } catch (e) {
+        if (e is ApiException && e.statusCode == 404) {
+          debugPrint('[Stripe] Order $orderId 404 while polling, continuing...');
+        } else if (e is ApiException) {
+          rethrow;
+        }
+      }
+      await Future.delayed(interval);
+    }
+    throw ApiException('Payment verification timed out. Please check your orders page.');
+  }
+
   /// Fetches securely saved cards for a registered user from backend / Stripe Customer Vault
   static Future<List<SavedCard>> getSavedCards(int buyerId) async {
     try {
-      final uri = Uri.parse('${ApiConfig.baseUrl}/payments/saved-cards/$buyerId');
-      final response = await http.get(uri);
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        final list = (decoded['data'] as List?) ?? [];
-        return list.map((item) => SavedCard.fromJson(item as Map<String, dynamic>)).toList();
-      }
+      final res = await ApiClient.get<List<dynamic>>(
+        '/payments/saved-cards/$buyerId',
+        fromJsonT: (json) => json is List ? json : [],
+      );
+      final list = res.data ?? [];
+      return list.map((item) => SavedCard.fromJson(item as Map<String, dynamic>)).toList();
     } catch (e) {
       debugPrint('Error fetching saved cards: $e');
     }
@@ -191,9 +179,10 @@ class StripePaymentService {
   }
 
   /// Full-stack checkout flow:
-  /// 1. Requests Stripe PaymentIntent from backend (with Customer & EphemeralKey)
+  /// 1. Calls POST /api/checkout (with Customer & EphemeralKey)
   /// 2. Initializes and displays Stripe Payment Sheet
-  /// 3. Returns the confirmed Stripe PaymentIntent ID upon success, or null if cancelled/failed
+  /// 3. Polls GET /api/orders/{id} until status == PAID
+  /// 4. Returns the confirmed Order ID string upon success, or null if cancelled/failed
   static Future<String?> processCheckout({
     required BuildContext context,
     required double amount,
@@ -205,29 +194,32 @@ class StripePaymentService {
     Map<String, String>? metadata,
   }) async {
     try {
-      // Step 1: Request PaymentIntent and clientSecret from backend
-      final intentResult = await createPaymentIntent(
-        amount: amount,
-        itemDetails: '$itemType: $itemTitle',
-        itemType: itemType,
-        itemId: itemId,
-        buyerId: buyerId,
-        saveCard: saveCard,
-        metadata: metadata,
+      final isCart = itemType.toLowerCase() == 'cart';
+      final checkoutResult = await createCheckout(
+        fromCart: isCart,
+        items: !isCart && itemId != null
+            ? [
+                {
+                  'type': itemType.toUpperCase(),
+                  'id': itemId,
+                  'quantity': 1,
+                }
+              ]
+            : null,
       );
 
-      final clientSecret = intentResult.clientSecret;
+      final clientSecret = checkoutResult.clientSecret;
       final isMock = clientSecret.contains('mock') || clientSecret.contains('placeholder');
 
-      // Step 2 & 3: Launch Stripe Payment Sheet (Mobile native only: iOS & Android)
       if (!isMock && !kIsWeb) {
         try {
           await presentNativePaymentSheet(
             clientSecret: clientSecret,
-            customerId: intentResult.customerId,
-            customerEphemeralKeySecret: intentResult.customerEphemeralKeySecret,
+            customerId: checkoutResult.customerId,
+            customerEphemeralKeySecret: checkoutResult.ephemeralKey,
           );
-          return intentResult.paymentIntentId;
+          await pollOrderStatus(checkoutResult.orderId);
+          return checkoutResult.orderId.toString();
         } on StripeException catch (e) {
           if (e.error.code == FailureCode.Canceled) {
             debugPrint('[Stripe] Payment sheet was cancelled by user');
@@ -243,13 +235,10 @@ class StripePaymentService {
             );
           }
           return null;
-        } catch (e) {
-          debugPrint('[Stripe] Sheet presentation exception: $e');
-          rethrow;
         }
       }
 
-      // Sandbox / Test Mode Handler for Placeholder Keys & Desktop Testing
+      // Web / desktop / sandbox fallback
       if (context.mounted) {
         final confirmed = await showDialog<bool>(
           context: context,
@@ -344,7 +333,7 @@ class StripePaymentService {
         );
 
         if (confirmed == true) {
-          return intentResult.paymentIntentId;
+          return checkoutResult.orderId.toString();
         }
       }
 
