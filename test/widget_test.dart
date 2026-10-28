@@ -7,10 +7,12 @@ import 'package:provider/provider.dart';
 import 'package:sound_marketplace_app/models/user_account.dart';
 import 'package:sound_marketplace_app/providers/auth_provider.dart';
 import 'package:sound_marketplace_app/providers/cart_provider.dart';
+import 'package:sound_marketplace_app/providers/marketplace_provider.dart';
 import 'package:sound_marketplace_app/screens/admin_moderation_screen.dart';
 import 'package:sound_marketplace_app/screens/auth_screen.dart';
 import 'package:sound_marketplace_app/screens/checkout_screen.dart';
 import 'package:sound_marketplace_app/screens/library_screen.dart';
+import 'package:sound_marketplace_app/screens/profile_screen.dart';
 import 'package:sound_marketplace_app/services/api_client.dart';
 import 'package:sound_marketplace_app/services/user_service.dart';
 
@@ -281,6 +283,52 @@ void main() {
       expect(find.byKey(const Key('reject_button_101')), findsOneWidget);
       expect(find.text('Approve'), findsOneWidget);
       expect(find.text('Reject'), findsOneWidget);
+    });
+
+    testWidgets('Admin moderation entry is hidden for non-admins and visible for admins in ProfileScreen', (tester) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final nonAdminUser = UserAccount(
+        id: 1,
+        email: 'fan@example.com',
+        displayName: 'Regular Fan',
+        roles: ['ROLE_CONSUMER'],
+      );
+
+      final adminUser = UserAccount(
+        id: 2,
+        email: 'admin@example.com',
+        displayName: 'Site Admin',
+        roles: ['ROLE_ADMIN'],
+      );
+
+      final authProv = AuthProvider();
+      authProv.setUserForTesting(nonAdminUser);
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: authProv),
+            ChangeNotifierProvider<MarketplaceProvider>(create: (_) => MarketplaceProvider()),
+            ChangeNotifierProvider<CartProvider>(create: (_) => CartProvider()),
+          ],
+          child: const MaterialApp(home: ProfileScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Non-admin: Admin Portal should NOT be found
+      expect(find.text('Admin Portal'), findsNothing);
+
+      // Now set admin user
+      authProv.setUserForTesting(adminUser);
+      await tester.pumpAndSettle();
+
+      // Admin: Admin Portal should be visible
+      expect(find.text('Admin Portal'), findsOneWidget);
+      expect(find.text('Review and approve or reject seller merchandise submissions before they appear in public search.'), findsOneWidget);
     });
   });
 

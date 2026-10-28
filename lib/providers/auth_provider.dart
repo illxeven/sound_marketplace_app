@@ -44,6 +44,12 @@ class AuthProvider extends ChangeNotifier {
   /// Providers holding per-user data (cart, playlists, likes, player) register a reset here.
   void addSignOutListener(VoidCallback listener) => _signOutListeners.add(listener);
 
+  @visibleForTesting
+  void setUserForTesting(UserAccount? user) {
+    _currentUser = user;
+    notifyListeners();
+  }
+
   void clearError() {
     if (_errorMessage == null && _errorCode == null) return;
     _errorMessage = null;
